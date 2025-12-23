@@ -1,9 +1,10 @@
-# app.py - Secure PDF Intelligence Assistant (Stylish Yellow Theme)
+# app.py - Secure PDF Intelligence Assistant with Web Search + RAG
 import os
 import streamlit as st
 from openai import OpenAI
 from agents import Agent, Runner, FileSearchTool
-from dotenv import load_dotenv  # Optional for local testing
+from agents.tools import WebSearchTool  # <-- New: Web Search Tool
+from dotenv import load_dotenv
 
 # ----------------------------- Load Secrets Safely -----------------------------
 load_dotenv(override=False)
@@ -70,6 +71,12 @@ st.markdown("""
         border: 4px solid #FFD700;
         box-shadow: 0 10px 30px rgba(0,0,0,0.3);
     }
+    .tool-use {
+        font-size: 1rem;
+        color: #8B4513;
+        font-style: italic;
+        margin: 0.5rem 0;
+    }
     .stChatInput > div > div > input {
         background: white !important;
         color: #333 !important;
@@ -87,14 +94,6 @@ st.markdown("""
         backdrop-filter: blur(8px);
         border: 1px solid #FFD700;
         box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-    }
-    .stButton > button {
-        background: #FF8C00 !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 15px !important;
-        font-weight: bold !important;
-        box-shadow: 0 6px 15px rgba(0,0,0,0.3);
     }
     .footer {
         text-align: center;
@@ -183,9 +182,8 @@ with st.sidebar:
 
 # ----------------------------- Main Area -----------------------------
 st.markdown("<h1>📄 Secure PDF Intelligence Assistant</h1>", unsafe_allow_html=True)
-st.markdown("<div class='big-bold'>Unlock insights from your confidential documents</div>", unsafe_allow_html=True)
+st.markdown("<div class='big-bold'>Unlock insights from your documents + real-time web knowledge</div>", unsafe_allow_html=True)
 
-# Only show welcome box if no chat yet
 if "pdfs_ready" not in st.session_state or not st.session_state.pdfs_ready:
     st.markdown("""
         <div class='status-box'>
@@ -197,27 +195,35 @@ elif not st.session_state.get("messages"):
     st.markdown("""
         <div class='status-box'>
             <h2>✨ Your documents are ready!</h2>
-            <p><strong>Ask your first question below 👇</strong></p>
+            <p><strong>Ask anything — I can search your PDFs or the web if needed 👇</strong></p>
         </div>
     """, unsafe_allow_html=True)
 
-# RAG Agent
+# ----------------------------- Tools: RAG + Web Search -----------------------------
 file_search_tool = FileSearchTool(vector_store_ids=[st.session_state.vector_store.id])
+web_search_tool = WebSearchTool()  # <-- Enables real-time web search
 
+# ----------------------------- Agent with Both Tools -----------------------------
 agent = Agent(
-    name="PDF Intelligence Expert",
+    name="PDF + Web Intelligence Expert",
     instructions="""
-You are a highly intelligent and professional assistant specialized in analyzing confidential PDF documents.
-- Always retrieve exact information using file search.
-- Provide clear, accurate, and insightful answers.
-- If information is not found, say: "I could not find that information in the uploaded documents."
-- Be concise, helpful, and professional.
+You are a highly intelligent assistant with access to:
+- Uploaded confidential PDF documents (use file search for exact quotes)
+- Real-time web search (use when information might not be in the PDFs or needs updating)
+
+Guidelines:
+- Prefer file search for anything in the uploaded PDFs.
+- Use web search for current events, recent data, or general knowledge not in documents.
+- Always be accurate and professional.
+- If not found in PDFs, you may search the web.
+- Cite sources when using web search.
+- If nothing found, say: "I could not find that information."
 """,
     model=MODEL_NAME,
-    tools=[file_search_tool],
+    tools=[file_search_tool, web_search_tool],  # Both tools enabled!
 )
 
-# Chat History
+# ----------------------------- Chat History -----------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -225,19 +231,24 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(f"**{msg['content']}**")
 
-# User Input
-if prompt := st.chat_input("🔍 Ask anything about your PDFs..."):
+# ----------------------------- User Input -----------------------------
+if prompt := st.chat_input("🔍 Ask anything — about your PDFs or the world..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(f"**{prompt}**")
 
     with st.chat_message("assistant"):
-        with st.spinner("🔍 Analyzing your documents..."):
+        with st.spinner("🔍 Thinking and searching..."):
             result = Runner.run_sync(agent, prompt)
             response = result.final_output
+
+            # Optional: Show which tool was used
+            if result.tool_calls:
+                tools_used = [call.name for call in result.tool_calls]
+                st.markdown(f"<div class='tool-use'>🛠 Used tools: {', '.join(tools_used)}</div>", unsafe_allow_html=True)
 
             st.markdown(f"**{response}**")
             st.session_state.messages.append({"role": "assistant", "content": response})
 
-# Footer
-st.markdown("<div class='footer'>🔒 Secure • Intelligent • Powered by OpenAI</div>", unsafe_allow_html=True)
+# ----------------------------- Footer -----------------------------
+st.markdown("<div class='footer'>🔒 Secure • Intelligent • PDF + Web Powered by OpenAI</div>", unsafe_allow_html=True)
