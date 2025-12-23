@@ -1,4 +1,4 @@
-# app.py - Secure PDF RAG Chatbot using Streamlit Secrets (GitHub Deployment Ready)
+# app.py - Secure PDF RAG Chatbot (Beautiful & Clean Chat Experience)
 import os
 import streamlit as st
 from openai import OpenAI
@@ -6,82 +6,89 @@ from agents import Agent, Runner, FileSearchTool
 from dotenv import load_dotenv  # Optional: only for local testing
 
 # ----------------------------- Load Secrets Safely -----------------------------
-# For local development: load from .env (optional)
 load_dotenv(override=False)
 
-# Primary source: Streamlit Secrets (used in deployment)
 if "OPENAI_API_KEY" not in st.secrets:
-    st.error("❌ OPENAI_API_KEY not found in Streamlit Secrets! Add it in your app settings.")
+    st.error("❌ OPENAI_API_KEY not found in Streamlit Secrets!")
     st.stop()
 
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 
-# Password from secrets (change this in Streamlit dashboard, not in code!)
 if "PASSWORD" not in st.secrets:
     st.error("❌ PASSWORD not found in Streamlit Secrets!")
     st.stop()
 
 PASSWORD = st.secrets["PASSWORD"]
 
-# Optional: Model name from secrets
 MODEL_NAME = st.secrets.get("MODEL_NAME", "gpt-4o")
 
-# ----------------------------- Beautiful Blue Theme -----------------------------
+# ----------------------------- Stunning & Colorful Theme -----------------------------
 st.set_page_config(page_title="Secure PDF RAG", layout="wide")
 
 st.markdown("""
 <style>
     .main {
-        background: linear-gradient(135deg, #0d47a1, #1976d2, #42a5f5);
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+        background-attachment: fixed;
         color: white;
         padding: 2rem;
     }
     [data-testid="stSidebar"] {
-        background: linear-gradient(to bottom, #1565c0, #1976d2);
+        background: linear-gradient(to bottom, #5e42a6, #764ba2);
         padding-top: 1rem;
+        border-right: 3px solid rgba(255,255,255,0.2);
     }
-    h1 { 
-        color: white !important; 
-        font-size: 3rem !important; 
-        font-weight: bold !important; 
-        text-align: center; 
+    h1 {
+        color: #ffffff !important;
+        font-size: 3.5rem !important;
+        font-weight: 800 !important;
+        text-align: center;
+        text-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        margin-bottom: 1rem;
     }
     .big-bold {
         font-size: 1.8rem !important;
         font-weight: bold !important;
-        color: white !important;
+        color: #e0e0ff !important;
         text-align: center;
         margin: 2rem 0;
     }
     .status-box {
         padding: 2rem;
         border-radius: 20px;
-        background: rgba(255,255,255,0.2);
+        background: rgba(255,255,255,0.15);
+        backdrop-filter: blur(10px);
         margin: 2rem auto;
         max-width: 900px;
         text-align: center;
         font-size: 1.4rem;
         font-weight: bold;
-    }
-    .ready-box {
-        background: rgba(0,255,0,0.3) !important;
-        border: 3px solid #00ff00;
-        color: white;
+        border: 2px solid rgba(255,255,255,0.3);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.2);
     }
     .stChatInput > div > div > input {
-        background: white !important;
-        color: black !important;
+        background: rgba(255,255,255,0.95) !important;
+        color: #333 !important;
         border-radius: 30px !important;
         font-size: 1.3rem !important;
-        padding: 1.2rem 1.5rem !important;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        padding: 1.3rem 1.8rem !important;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+        border: none;
+    }
+    .stChatMessage {
+        background: rgba(255,255,255,0.1);
+        border-radius: 18px;
+        padding: 1rem;
+        margin: 1rem 0;
+        backdrop-filter: blur(5px);
     }
     .footer {
         text-align: center;
-        color: #bbdefb;
-        margin-top: 6rem;
+        color: #d0d0ff;
+        margin-top: 8rem;
         font-size: 1.1rem;
         font-weight: bold;
+        text-shadow: 0 2px 5px rgba(0,0,0,0.3);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -164,59 +171,60 @@ with st.sidebar:
 st.markdown("<h1>📄 Secure PDF Intelligence Assistant</h1>", unsafe_allow_html=True)
 st.markdown("<div class='big-bold'>Ask any question about your uploaded PDFs</div>", unsafe_allow_html=True)
 
+# Only show "Ready" box if no messages yet (i.e., user hasn't asked anything)
 if "pdfs_ready" not in st.session_state or not st.session_state.pdfs_ready:
     st.markdown("""
         <div class='status-box'>
             <h3>⏳ Waiting for PDF upload...</h3>
-            <p>Upload your PDFs in the sidebar → Processing will start → Chat will activate</p>
+            <p>Upload your documents in the sidebar to begin.</p>
         </div>
     """, unsafe_allow_html=True)
-else:
+elif not st.session_state.get("messages"):  # No questions asked yet
     st.markdown("""
-        <div class='status-box ready-box'>
-            <h2>✅ Ready! Your documents are loaded</h2>
-            <p><strong>Type your question below 👇</strong></p>
+        <div class='status-box'>
+            <h2>✅ Your documents are ready!</h2>
+            <p><strong>Type your first question below 👇</strong></p>
         </div>
     """, unsafe_allow_html=True)
+# Otherwise: no box — clean chat view
 
-    # RAG Tool
-    file_search_tool = FileSearchTool(vector_store_ids=[st.session_state.vector_store.id])
+# RAG Agent Setup
+file_search_tool = FileSearchTool(vector_store_ids=[st.session_state.vector_store.id])
 
-    # Agent
-    agent = Agent(
-        name="Secure PDF Expert",
-        instructions="""
-You are a highly accurate assistant specialized in analyzing confidential PDF documents.
-- Always use file search to retrieve exact information from uploaded PDFs.
-- Provide clear, professional answers with direct references.
+agent = Agent(
+    name="Secure PDF Expert",
+    instructions="""
+You are a highly accurate and professional assistant analyzing confidential PDF documents.
+- Always search and retrieve exact information from the uploaded PDFs.
+- Provide clear, detailed, and concise answers.
 - If information is not found, respond: "I could not find that information in the uploaded documents."
-- Never guess or fabricate details.
+- Be helpful and professional.
 """,
-        model=MODEL_NAME,
-        tools=[file_search_tool],
-    )
+    model=MODEL_NAME,
+    tools=[file_search_tool],
+)
 
-    # Chat history
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+# Chat History
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(f"**{msg['content']}**")
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(f"**{msg['content']}**")
 
-    # User input
-    if prompt := st.chat_input("🔍 Ask your question here..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(f"**{prompt}**")
+# User Input
+if prompt := st.chat_input("🔍 Ask your question here..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(f"**{prompt}**")
 
-        with st.chat_message("assistant"):
-            with st.spinner("🔍 Searching your documents..."):
-                result = Runner.run_sync(agent, prompt)
-                response = result.final_output
+    with st.chat_message("assistant"):
+        with st.spinner("🔍 Searching your documents..."):
+            result = Runner.run_sync(agent, prompt)
+            response = result.final_output
 
-                st.markdown(f"**{response}**")
-                st.session_state.messages.append({"role": "assistant", "content": response})
+            st.markdown(f"**{response}**")
+            st.session_state.messages.append({"role": "assistant", "content": response})
 
 # Footer
-st.markdown("<div class='footer'>🔒 Secure • Private • Powered by OpenAI Agents SDK</div>", unsafe_allow_html=True)
+st.markdown("<div class='footer'>🔒 Secure • Private • Powered by OpenAI</div>", unsafe_allow_html=True)
