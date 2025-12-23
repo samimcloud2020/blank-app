@@ -1,4 +1,4 @@
-# app.py - Secure PDF Intelligence Assistant with PDF RAG + Web Search (Yellow Theme)
+# app.py - Secure PDF Intelligence Assistant (PDF RAG + Web Search Always Available)
 import os
 import streamlit as st
 from openai import OpenAI
@@ -124,7 +124,7 @@ with st.sidebar:
     st.success("✅ **Authenticated**")
     st.markdown("---")
     st.markdown("### 📤 **Upload PDF Documents**")
-    st.markdown("**Drag & drop your PDFs below**")
+    st.markdown("**Drag & drop your PDFs below (optional)**")
 
     uploaded_files = st.file_uploader(
         "Upload PDFs",
@@ -170,51 +170,54 @@ with st.sidebar:
         st.session_state.vector_store = vector_store
         st.session_state.pdfs_ready = True
 
-        st.success(f"✅ {total} PDF(s) fully processed and ready!")
+        st.success(f"✅ {total} PDF(s) fully processed!")
         st.balloons()
 
 # ----------------------------- Main Area -----------------------------
 st.markdown("<h1>📄 Secure PDF Intelligence Assistant</h1>", unsafe_allow_html=True)
-st.markdown("<div class='big-bold'>Unlock insights from your documents + real-time web knowledge</div>", unsafe_allow_html=True)
+st.markdown("<div class='big-bold'>Ask anything — about your PDFs or the world</div>", unsafe_allow_html=True)
 
+# Status message
 if "pdfs_ready" not in st.session_state or not st.session_state.pdfs_ready:
     st.markdown("""
         <div class='status-box'>
-            <h3>⏳ Waiting for PDF upload...</h3>
-            <p>Upload your documents in the sidebar to begin.</p>
+            <h3>🌐 Web search is always available</h3>
+            <p>You can ask general questions right now. Upload PDFs for document-specific answers.</p>
         </div>
     """, unsafe_allow_html=True)
-elif not st.session_state.get("messages"):
+else:
     st.markdown("""
         <div class='status-box'>
-            <h2>✨ Your documents are ready!</h2>
-            <p><strong>Ask anything — I can search your PDFs or the web 👇</strong></p>
+            <h2>✅ PDFs loaded + Web search ready</h2>
+            <p>Ask anything — I’ll search your documents and the web as needed.</p>
         </div>
     """, unsafe_allow_html=True)
 
-# ----------------------------- Tools & Agent -----------------------------
-file_search_tool = FileSearchTool(vector_store_ids=[st.session_state.vector_store.id])
-web_search_tool = WebSearchTool()
+# ----------------------------- Tools & Agent (Safe Setup) -----------------------------
+tools = [WebSearchTool()]  # Web search always available
+
+# Add PDF search only if PDFs are uploaded
+if st.session_state.get("pdfs_ready") and "vector_store" in st.session_state:
+    file_search_tool = FileSearchTool(vector_store_ids=[st.session_state.vector_store.id])
+    tools.append(file_search_tool)
 
 agent = Agent(
     name="PDF + Web Intelligence Expert",
     instructions="""
-You are a highly intelligent and professional assistant with access to two powerful tools:
+You are a highly intelligent and professional assistant with access to:
+- Real-time web search (always available)
+- File search on uploaded confidential PDFs (only when PDFs are loaded)
 
-1. File Search — for retrieving exact information from the uploaded confidential PDF documents
-2. Web Search — for real-time, up-to-date information from the internet
-
-Your decision-making rules:
-- ALWAYS check the uploaded PDFs first using file search for any information that might be in the documents.
-- If the question involves specific content, quotes, data, or details from the PDFs → use file search.
-- If the answer is not in the PDFs OR requires current events, recent news, stock prices, weather, general knowledge, or external verification → use web search.
-- You can use BOTH tools in the same response when needed (e.g., compare PDF data with latest web info).
-- Always be accurate, professional, and concise.
-- When using web search, cite your sources clearly.
-- If information is not found in either tool, say: "I could not find that information."
+Decision rules:
+- If PDFs are uploaded: ALWAYS search them first for any document-specific info.
+- Use web search for current events, general knowledge, news, prices, or anything not in PDFs.
+- You can use both tools together when needed (e.g., verify PDF data with latest web info).
+- Be accurate, concise, and professional.
+- Cite web sources when used.
+- If nothing found, say: "I could not find that information."
 """,
     model=MODEL_NAME,
-    tools=[file_search_tool, web_search_tool],
+    tools=tools,
 )
 
 # ----------------------------- Chat History & Input -----------------------------
@@ -225,14 +228,14 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(f"**{msg['content']}**")
 
-# User Input — FIXED: No more result.messages access
-if prompt := st.chat_input("🔍 Ask anything — about your PDFs or the world..."):
+# Chat input — ALWAYS visible
+if prompt := st.chat_input("🔍 Ask anything here..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(f"**{prompt}**")
 
     with st.chat_message("assistant"):
-        with st.spinner("🔍 Thinking and searching..."):
+        with st.spinner("🔍 Searching..."):
             result = Runner.run_sync(agent, prompt)
             response = result.final_output
 
