@@ -70,13 +70,6 @@ st.markdown("""
         border: 4px solid #FFD700;
         box-shadow: 0 10px 30px rgba(0,0,0,0.3);
     }
-    .tool-use {
-        font-size: 1rem;
-        color: #8B4513;
-        font-style: italic;
-        margin: 0.5rem 0;
-        text-align: right;
-    }
     .stChatInput > div > div > input {
         background: white !important;
         color: #333 !important;
@@ -184,7 +177,6 @@ with st.sidebar:
 st.markdown("<h1>📄 Secure PDF Intelligence Assistant</h1>", unsafe_allow_html=True)
 st.markdown("<div class='big-bold'>Unlock insights from your documents + real-time web knowledge</div>", unsafe_allow_html=True)
 
-# Show status only if needed
 if "pdfs_ready" not in st.session_state or not st.session_state.pdfs_ready:
     st.markdown("""
         <div class='status-box'>
@@ -229,6 +221,7 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(f"**{msg['content']}**")
 
+# User Input — FIXED: No more result.messages access
 if prompt := st.chat_input("🔍 Ask anything — about your PDFs or the world..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -238,16 +231,6 @@ if prompt := st.chat_input("🔍 Ask anything — about your PDFs or the world..
         with st.spinner("🔍 Thinking and searching..."):
             result = Runner.run_sync(agent, prompt)
             response = result.final_output
-
-            # Safely check for tool usage
-            tools_used = []
-            if result.messages:
-                last_msg = result.messages[-1]
-                if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
-                    tools_used = [tc.function.name for tc in last_msg.tool_calls]
-
-            if tools_used:
-                st.markdown(f"<div class='tool-use'>🛠 Used: {', '.join(tools_used)}</div>", unsafe_allow_html=True)
 
             st.markdown(f"**{response}**")
             st.session_state.messages.append({"role": "assistant", "content": response})
