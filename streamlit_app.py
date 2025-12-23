@@ -1,8 +1,8 @@
-# app.py - Secure PDF Intelligence Assistant with Web Search + RAG
+# app.py - Secure PDF Intelligence Assistant with PDF RAG + Web Search (Yellow Theme)
 import os
 import streamlit as st
 from openai import OpenAI
-from agents import Agent, Runner, FileSearchTool, WebSearchTool  # ← Fixed: WebSearchTool from top level
+from agents import Agent, Runner, FileSearchTool, WebSearchTool
 from dotenv import load_dotenv
 
 # ----------------------------- Load Secrets Safely -----------------------------
@@ -75,6 +75,7 @@ st.markdown("""
         color: #8B4513;
         font-style: italic;
         margin: 0.5rem 0;
+        text-align: right;
     }
     .stChatInput > div > div > input {
         background: white !important;
@@ -183,46 +184,44 @@ with st.sidebar:
 st.markdown("<h1>📄 Secure PDF Intelligence Assistant</h1>", unsafe_allow_html=True)
 st.markdown("<div class='big-bold'>Unlock insights from your documents + real-time web knowledge</div>", unsafe_allow_html=True)
 
+# Show status only if needed
 if "pdfs_ready" not in st.session_state or not st.session_state.pdfs_ready:
     st.markdown("""
         <div class='status-box'>
             <h3>⏳ Waiting for PDF upload...</h3>
-            <p>Upload your documents in the sidebar to activate the AI assistant.</p>
+            <p>Upload your documents in the sidebar to begin.</p>
         </div>
     """, unsafe_allow_html=True)
 elif not st.session_state.get("messages"):
     st.markdown("""
         <div class='status-box'>
             <h2>✨ Your documents are ready!</h2>
-            <p><strong>Ask anything — I can search your PDFs or the web if needed 👇</strong></p>
+            <p><strong>Ask anything — I can search your PDFs or the web 👇</strong></p>
         </div>
     """, unsafe_allow_html=True)
 
-# ----------------------------- Tools: RAG + Web Search -----------------------------
+# ----------------------------- Tools & Agent -----------------------------
 file_search_tool = FileSearchTool(vector_store_ids=[st.session_state.vector_store.id])
-web_search_tool = WebSearchTool()  # <-- Enables real-time web search
+web_search_tool = WebSearchTool()
 
-# ----------------------------- Agent with Both Tools -----------------------------
 agent = Agent(
     name="PDF + Web Intelligence Expert",
     instructions="""
 You are a highly intelligent assistant with access to:
-- Uploaded confidential PDF documents (use file search for exact quotes)
-- Real-time web search (use when information might not be in the PDFs or needs updating)
+- Confidential uploaded PDF documents (use file search)
+- Real-time web search (use for current or external info)
 
-Guidelines:
-- Prefer file search for anything in the uploaded PDFs.
-- Use web search for current events, recent data, or general knowledge not in documents.
+Rules:
+- Use file search for anything in the PDFs.
+- Use web search for up-to-date facts, news, or general knowledge.
 - Always be accurate and professional.
-- If not found in PDFs, you may search the web.
 - Cite sources when using web search.
-- If nothing found, say: "I could not find that information."
 """,
     model=MODEL_NAME,
-    tools=[file_search_tool, web_search_tool],  # Both tools enabled!
+    tools=[file_search_tool, web_search_tool],
 )
 
-# ----------------------------- Chat History -----------------------------
+# ----------------------------- Chat History & Input -----------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -230,7 +229,6 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(f"**{msg['content']}**")
 
-# ----------------------------- User Input -----------------------------
 if prompt := st.chat_input("🔍 Ask anything — about your PDFs or the world..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -241,10 +239,15 @@ if prompt := st.chat_input("🔍 Ask anything — about your PDFs or the world..
             result = Runner.run_sync(agent, prompt)
             response = result.final_output
 
-            # Optional: Show which tool was used
-            if result.tool_calls:
-                tools_used = [call.name for call in result.tool_calls]
-                st.markdown(f"<div class='tool-use'>🛠 Used tools: {', '.join(tools_used)}</div>", unsafe_allow_html=True)
+            # Safely check for tool usage
+            tools_used = []
+            if result.messages:
+                last_msg = result.messages[-1]
+                if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
+                    tools_used = [tc.function.name for tc in last_msg.tool_calls]
+
+            if tools_used:
+                st.markdown(f"<div class='tool-use'>🛠 Used: {', '.join(tools_used)}</div>", unsafe_allow_html=True)
 
             st.markdown(f"**{response}**")
             st.session_state.messages.append({"role": "assistant", "content": response})
