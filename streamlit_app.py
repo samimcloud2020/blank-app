@@ -2,8 +2,7 @@
 import os
 import streamlit as st
 from openai import OpenAI
-from agents import Agent, Runner, FileSearchTool
-from agents.tools import WebSearchTool  # <-- New: Web Search Tool
+from agents import Agent, Runner, FileSearchTool, WebSearchTool  # ← Fixed: WebSearchTool from top level
 from dotenv import load_dotenv
 
 # ----------------------------- Load Secrets Safely -----------------------------
