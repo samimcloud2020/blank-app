@@ -1,4 +1,4 @@
-# app.py - Secure PDF Intelligence Assistant (PDF Priority + Web Search)
+# app.py - Secure PDF Intelligence Assistant (PDF First Priority + Web Fallback)
 import os
 import streamlit as st
 from openai import OpenAI
@@ -175,56 +175,57 @@ with st.sidebar:
 
 # ----------------------------- Main Area -----------------------------
 st.markdown("<h1>📄 Secure PDF Intelligence Assistant</h1>", unsafe_allow_html=True)
-st.markdown("<div class='big-bold'>Ask anything — I’ll search your PDFs first, then the web if needed</div>", unsafe_allow_html=True)
+st.markdown("<div class='big-bold'>Ask anything — I'll check your PDFs first, then the web if needed</div>", unsafe_allow_html=True)
 
 # Status message
 if "pdfs_ready" not in st.session_state or not st.session_state.pdfs_ready:
     st.markdown("""
         <div class='status-box'>
             <h3>🌐 Web search ready</h3>
-            <p>You can ask general questions now. Upload PDFs for document-specific answers.</p>
+            <p>You can ask questions now. Upload PDFs for document-specific answers.</p>
         </div>
     """, unsafe_allow_html=True)
 else:
     st.markdown("""
         <div class='status-box'>
-            <h2>✅ PDFs + Web search ready</h2>
-            <p>I will always check your documents first for the most accurate answer.</p>
+            <h2>✅ PDFs loaded</h2>
+            <p><strong>I will always search your documents first for the most accurate answer.</strong></p>
         </div>
     """, unsafe_allow_html=True)
 
-# ----------------------------- Tools & Agent (PDF Priority) -----------------------------
+# ----------------------------- Tools & Agent (PDF = Top Priority) -----------------------------
 tools = [WebSearchTool()]  # Web search always available
 
 if st.session_state.get("pdfs_ready") and "vector_store" in st.session_state:
     file_search_tool = FileSearchTool(vector_store_ids=[st.session_state.vector_store.id])
-    tools = [file_search_tool, WebSearchTool()]  # PDF search first in list = higher priority
+    tools = [file_search_tool, WebSearchTool()]  # File search FIRST in list → higher priority
 
 agent = Agent(
     name="PDF-First Intelligence Expert",
     instructions="""
-You are a highly intelligent assistant with strict priority rules:
+You are a highly intelligent assistant with strict priority:
 
-PRIORITY 1: Always search the uploaded PDF documents first using file search.
-- If the question is about content, data, quotes, or anything that could be in the PDFs → use file search FIRST.
-- Trust and prefer information from the PDFs as the most authoritative source.
+1. TOP PRIORITY: Always search the uploaded PDF documents FIRST using file search.
+   - If the question is about content in the PDFs (e.g., ownership, revenue, dates, numbers, statements), use file search.
+   - Trust PDF content as the primary and most authoritative source.
 
-PRIORITY 2: Only use web search if:
-- The information is not in the PDFs
-- The question is about current events, news, prices, general knowledge, or real-time data
+2. FALLBACK: Only use web search if:
+   - No relevant information is found in the PDFs
+   - The question is about current year (2025 or later), recent events, or general knowledge not in documents
 
-You may use both tools if needed (e.g., verify PDF data with latest web info).
+3. You may use both tools when comparing PDF data with current info.
 
-Final rules:
-- Be accurate, professional, and concise.
-- Cite web sources when used.
-- If not found, say: "I could not find that information in the documents or on the web."
+Rules:
+- Be accurate and professional.
+- If PDF has the info → use it and say "According to the uploaded document..."
+- If not in PDF → use web search and cite source.
+- If not found anywhere → say: "I could not find that information in the documents or on the web."
 """,
     model=MODEL_NAME,
     tools=tools,
 )
 
-# ----------------------------- Chat History & Input -----------------------------
+# ----------------------------- Chat History (Shows query immediately) -----------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -232,12 +233,15 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(f"**{msg['content']}**")
 
-# Chat input — ALWAYS visible
-if prompt := st.chat_input("🔍 Ask anything — I'll check your PDFs first"):
+# User Input — Query appears instantly
+if prompt := st.chat_input("🔍 Ask anything — I'll search your PDFs first"):
+    # Show user question immediately
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(f"**{prompt}**")
+    st.rerun()  # Force immediate display of user message
 
+    # Now process the answer
     with st.chat_message("assistant"):
         with st.spinner("🔍 Searching your documents first..."):
             result = Runner.run_sync(agent, prompt)
@@ -246,5 +250,7 @@ if prompt := st.chat_input("🔍 Ask anything — I'll check your PDFs first"):
             st.markdown(f"**{response}**")
             st.session_state.messages.append({"role": "assistant", "content": response})
 
+    st.rerun()  # Refresh to show full conversation
+
 # ----------------------------- Footer -----------------------------
-st.markdown("<div class='footer'>🔒 Secure • Intelligent • PDF Priority + Web Backup • Powered by OpenAI</div>", unsafe_allow_html=True)
+st.markdown("<div class='footer'>🔒 Secure • Intelligent • PDF Priority + Web Fallback • Powered by OpenAI</div>", unsafe_allow_html=True)
