@@ -222,7 +222,7 @@ Rules:
 - If not found → say: "I could not find that information in the documents or on the web."
 """,
     model=MODEL_NAME,
-    tools=tools,
+    tools = [file_search_tool, WebSearchTool()],
 )
 
 # ----------------------------- Chat History -----------------------------
