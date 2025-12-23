@@ -1,17 +1,30 @@
-# app.py - FINAL 100% WORKING VERSION with OpenAI Agents SDK (Dec 2025)
+# app.py - Secure PDF RAG Chatbot using Streamlit Secrets (GitHub Deployment Ready)
 import os
 import streamlit as st
 from openai import OpenAI
 from agents import Agent, Runner, FileSearchTool
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # Optional: only for local testing
 
-# ----------------------------- Load API Key -----------------------------
-load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# ----------------------------- Load Secrets Safely -----------------------------
+# For local development: load from .env (optional)
+load_dotenv(override=False)
 
-if not OPENAI_API_KEY:
-    st.error("❌ Please add your OPENAI_API_KEY to the .env file!")
+# Primary source: Streamlit Secrets (used in deployment)
+if "OPENAI_API_KEY" not in st.secrets:
+    st.error("❌ OPENAI_API_KEY not found in Streamlit Secrets! Add it in your app settings.")
     st.stop()
+
+OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+
+# Password from secrets (change this in Streamlit dashboard, not in code!)
+if "PASSWORD" not in st.secrets:
+    st.error("❌ PASSWORD not found in Streamlit Secrets!")
+    st.stop()
+
+PASSWORD = st.secrets["PASSWORD"]
+
+# Optional: Model name from secrets
+MODEL_NAME = st.secrets.get("MODEL_NAME", "gpt-4o")
 
 # ----------------------------- Beautiful Blue Theme -----------------------------
 st.set_page_config(page_title="Secure PDF RAG", layout="wide")
@@ -80,16 +93,14 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 with st.sidebar:
     st.markdown("### 🔐 **Access Control**")
 
-    PASSWORD = "Samim9434*#"
-
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
 
     if not st.session_state.authenticated:
-        st.markdown("**Enter password to access the system**")
-        password = st.text_input("Password", type="password", label_visibility="collapsed")
+        st.markdown("**Enter your access password**")
+        password_input = st.text_input("Password", type="password", label_visibility="collapsed")
         if st.button("🔓 Login"):
-            if password == PASSWORD:
+            if password_input == PASSWORD:
                 st.session_state.authenticated = True
                 st.success("✅ Access granted!")
                 st.rerun()
@@ -103,7 +114,7 @@ with st.sidebar:
     st.markdown("**Drag & drop your PDFs below**")
 
     uploaded_files = st.file_uploader(
-        "Upload PDFs",  # Fixed label
+        "Upload PDFs",
         type=["pdf"],
         accept_multiple_files=True,
         label_visibility="collapsed"
@@ -128,7 +139,7 @@ with st.sidebar:
             os.remove(temp_path)
             progress_bar.progress((i + 1) / total * 0.7)
 
-        status_text.text("Creating/retrieving knowledge base...")
+        status_text.text("Setting up knowledge base...")
         stores = client.vector_stores.list(limit=20)
         vector_store = next((vs for vs in stores.data if vs.name == "Secure_PDF_RAG_Store"), None)
         if not vector_store:
@@ -157,7 +168,7 @@ if "pdfs_ready" not in st.session_state or not st.session_state.pdfs_ready:
     st.markdown("""
         <div class='status-box'>
             <h3>⏳ Waiting for PDF upload...</h3>
-            <p>Upload PDFs in the sidebar → Watch progress → Chat box will appear below</p>
+            <p>Upload your PDFs in the sidebar → Processing will start → Chat will activate</p>
         </div>
     """, unsafe_allow_html=True)
 else:
@@ -173,18 +184,19 @@ else:
 
     # Agent
     agent = Agent(
-        name="PDF Expert",
+        name="Secure PDF Expert",
         instructions="""
-You are a professional assistant analyzing uploaded PDF documents.
-- Always use file search to retrieve exact content.
-- Provide accurate, detailed answers with references.
-- If not found, say: "I could not find that information in the uploaded documents."
+You are a highly accurate assistant specialized in analyzing confidential PDF documents.
+- Always use file search to retrieve exact information from uploaded PDFs.
+- Provide clear, professional answers with direct references.
+- If information is not found, respond: "I could not find that information in the uploaded documents."
+- Never guess or fabricate details.
 """,
-        model="gpt-4o",
+        model=MODEL_NAME,
         tools=[file_search_tool],
     )
 
-    # Messages
+    # Chat history
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
@@ -192,7 +204,7 @@ You are a professional assistant analyzing uploaded PDF documents.
         with st.chat_message(msg["role"]):
             st.markdown(f"**{msg['content']}**")
 
-    # Chat input + run
+    # User input
     if prompt := st.chat_input("🔍 Ask your question here..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
@@ -200,10 +212,7 @@ You are a professional assistant analyzing uploaded PDF documents.
 
         with st.chat_message("assistant"):
             with st.spinner("🔍 Searching your documents..."):
-                result = Runner.run_sync(
-                    agent,
-                    prompt
-                )
+                result = Runner.run_sync(agent, prompt)
                 response = result.final_output
 
                 st.markdown(f"**{response}**")
