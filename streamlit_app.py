@@ -6,7 +6,7 @@ from main import PatientContext, Runner, doctor_agent, InputGuardrailTripwireTri
 
 st.set_page_config(page_title="🩺 AI Doctor - Rourkela", page_icon="🩺", layout="centered")
 
-# === PRODUCTION-READY STUNNING DESIGN ===
+# === ULTRA PROFESSIONAL & COLORFUL DESIGN ===
 st.markdown("""
 <style>
     .big-title {
@@ -45,7 +45,7 @@ st.markdown("""
         padding: 45px; 
         box-shadow: 0 20px 50px rgba(34,197,94,0.25);
         margin: 30px 0;
-        min-height: 500px;
+        min-height: 600px;
     }
     .med-item {
         background: linear-gradient(to right, #f0fdf4, #bbf7d0); 
@@ -54,7 +54,6 @@ st.markdown("""
         margin: 20px 0; 
         border-left: 10px solid #16a34a;
         box-shadow: 0 8px 25px rgba(34,197,94,0.2);
-        transition: transform 0.3s;
     }
     .patient-card {
         background: linear-gradient(to bottom, #dbeafe, #bfdbfe, #93c5fd); 
@@ -63,33 +62,22 @@ st.markdown("""
         border-radius: 20px;
         box-shadow: 0 12px 35px rgba(37,99,235,0.2);
         font-size: 17px;
-        min-height: 400px;
+        min-height: 500px;
     }
     .sidebar .sidebar-content {
         background: linear-gradient(180deg, #7c3aed, #a855f7, #c084fc); 
         color: white;
         border-radius: 20px;
     }
-    .stTextInput > div > div > input, .stSelectbox > div > div > select {
-        background-color: rgba(255,255,255,0.9) !important;
+    .stTextInput > div > div > input, .stSelectbox > div > div > select, .stMultiSelect > div {
+        background-color: rgba(255,255,255,0.95) !important;
         color: #1e293b !important;
         font-weight: bold;
     }
-    .stButton>button {
-        background: linear-gradient(90deg, #ec4899, #f43f5e); 
-        color: white; 
-        font-weight: bold; 
-        border-radius: 15px; 
-        height: 60px; 
-        font-size: 20px;
-        border: none;
-        box-shadow: 0 8px 20px rgba(236,72,153,0.4);
-    }
-    h1, h2, h3, h4 {color: #1e293b;}
 </style>
 """, unsafe_allow_html=True)
 
-# Main Header
+# Header
 st.markdown("<div class='big-title'>🩺 AI DOCTOR</div>", unsafe_allow_html=True)
 st.markdown("""
 <div class='header-box'>
@@ -99,33 +87,36 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# === LEFT SIDEBAR - SUPER COLORFUL & ATTRACTIVE ===
+# Initialize session state
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "current_prescription" not in st.session_state:
+    st.session_state.current_prescription = None  # Will hold the latest Prescription object
+
+# Sidebar
 with st.sidebar:
     st.markdown("""
     <div style='text-align:center; padding:25px; background:linear-gradient(135deg,#a855f7,#e879f9); border-radius:20px; box-shadow:0 10px 30px rgba(168,85,247,0.4);'>
         <h2 style='color:white; margin:0; font-size:32px;'>👤 Patient Profile</h2>
-        <p style='color:#f3e8ff; font-size:18px; margin:10px 0 0 0;'>Enter your details below</p>
+        <p style='color:#f3e8ff; font-size:18px;'>Enter your details</p>
     </div>
     """, unsafe_allow_html=True)
 
-    name = st.text_input("**Full Name**", value="S K Patel", placeholder="Your full name", key="name")
-    age = st.number_input("**Age**", min_value=1, max_value=120, value=46, key="age")
-    gender = st.selectbox("**Gender**", ["Male", "Female", "Other"], key="gender")
+    name = st.text_input("**Full Name**", value="S K Patel", placeholder="Your name")
+    age = st.number_input("**Age**", min_value=1, max_value=120, value=46)
+    gender = st.selectbox("**Gender**", ["Male", "Female", "Other"])
 
     st.markdown("#### 😷 Current Symptoms")
-    symptoms = st.multiselect("Select all that apply", [
+    symptoms = st.multiselect("Select symptoms", [
         "Fever", "Headache", "Cold & Cough", "Sore Throat", "Body Pain", "Acidity",
-        "Allergy", "Stomach Upset", "Loose Motion", "Vomiting", "Weakness", "Breathing Difficulty"
-    ], key="symptoms")
-    other = st.text_input("Any other symptoms?", key="other_symptom")
-    if other:
-        symptoms.append(other)
-
-    allergies = st.text_input("**Known Allergies**", placeholder="e.g., dust, penicillin", value="dust", key="allergies")
-    current_meds = st.text_input("**Current Medicines**", placeholder="e.g., paracetamol", value="paracetamol", key="meds")
-
-    # Build context
+        "Allergy", "Stomach Upset", "Loose Motion", "Vomiting", "Weakness"
+    ])
+    other = st.text_input("Other symptoms?")
     all_symptoms = symptoms + ([other] if other else [])
+
+    allergies = st.text_input("**Allergies**", value="dust", placeholder="e.g., penicillin")
+    current_meds = st.text_input("**Current Medicines**", value="paracetamol", placeholder="none")
+
     patient_context = PatientContext(
         patient_id=name or "Patient",
         age=age,
@@ -139,155 +130,138 @@ with st.sidebar:
     st.markdown("---")
     st.markdown(f"""
     <div style='text-align:center; background:linear-gradient(90deg,#ec4899,#f43f5e); padding:20px; border-radius:20px; color:white; box-shadow:0 10px 30px rgba(236,72,153,0.5);'>
-        <h2 style='margin:0;'>✅ Ready for Consultation</h2>
-        <h3 style='margin:10px 0 0 0;'>{name or "Patient"} • {age} yrs</h3>
+        <h2 style='margin:0;'>✅ Consultation Ready</h2>
+        <h3 style='margin:10px 0 0 0;'>{name} • {age} yrs</h3>
     </div>
     """, unsafe_allow_html=True)
 
-# === MAIN AREA - ALWAYS SHOW PATIENT CARD & PRESCRIPTION BOX ===
-st.markdown("<h2 style='text-align:center; color:#1e293b;'>Your Personalized Consultation</h2>", unsafe_allow_html=True)
+# Main Layout
+st.markdown("<h2 style='text-align:center; color:#1e293b; margin-bottom:30px;'>Your Personalized Consultation</h2>", unsafe_allow_html=True)
 
 col1, col2 = st.columns([1.4, 2.6])
-
 today = date.today().strftime("%d %B %Y")
 
+# Left: Patient Card (always visible)
 with col1:
     st.markdown(f"""
     <div class='patient-card'>
-        <h2 style='color:#2563eb; text-align:center; margin-top:0;'>📋 Patient Card</h2>
-        <div style='text-align:center; padding:15px; background:#e0f2fe; border-radius:15px; margin:15px 0;'>
+        <h2 style='color:#2563eb; text-align:center;'>📋 Patient Card</h2>
+        <div style='text-align:center; padding:20px; background:#e0f2fe; border-radius:20px; margin:20px 0;'>
             <h3 style='margin:5px; color:#1e40af;'>{patient_context.patient_id}</h3>
             <p style='margin:5px; font-size:18px;'><strong>Age:</strong> {patient_context.age} • <strong>Gender:</strong> {patient_context.gender}</p>
             <p style='margin:5px; color:#dc2626;'><strong>Date:</strong> {today}</p>
         </div>
-        <strong style='color:#dc2626;'>Chief Complaints:</strong><br>
-        <i style='color:#374151; font-size:16px;'>
-            {', '.join(patient_context.current_symptoms) or 'No symptoms entered yet'}
+        <strong style='color:#dc2626;'>Symptoms:</strong><br>
+        <i style='font-size:16px; color:#374151;'>
+            {', '.join(patient_context.current_symptoms) or 'No symptoms entered'}
         </i>
-        <hr style='border:1px dashed #93c5fd; margin:20px 0;'>
-        <p><strong>Allergies:</strong> {allergies or 'None declared'}</p>
+        <hr style='border:1px dashed #93c5fd; margin:25px 0;'>
+        <p><strong>Allergies:</strong> {allergies or 'None'}</p>
         <p><strong>Current Meds:</strong> {current_meds or 'None'}</p>
     </div>
     """, unsafe_allow_html=True)
 
+# Right: Prescription Area (always visible, updated permanently)
 with col2:
     st.markdown("<div class='rx-box'>", unsafe_allow_html=True)
 
-    # Always show clinic header
     st.markdown("""
     <div style='text-align:center; margin-bottom:40px;'>
-        <h1 style='color:#dc2626; font-weight:900; margin:0; font-size:52px; text-shadow: 3px 3px 10px rgba(220,38,38,0.3);'>AI DOCTOR</h1>
-        <h2 style='color:#16a34a; margin:10px 0 5px 0; font-weight:bold;'>Virtual Health Clinic</h2>
+        <h1 style='color:#dc2626; font-weight:900; font-size:52px; text-shadow: 3px 3px 10px rgba(220,38,38,0.3);'>AI DOCTOR</h1>
+        <h2 style='color:#16a34a; margin:10px 0 5px 0;'>Virtual Health Clinic</h2>
         <h3 style='color:#2563eb; margin:0;'><strong>Rourkela, Odisha, India</strong></h3>
     </div>
     """, unsafe_allow_html=True)
 
-    # Big Rx
     st.markdown("<div class='rx-header'>Rx</div>", unsafe_allow_html=True)
 
-    # Placeholder if no prescription yet
-    if "last_prescription" not in st.session_state:
+    # Show latest prescription if exists
+    if st.session_state.current_prescription:
+        output = st.session_state.current_prescription
+        for i in range(len(output.medications)):
+            st.markdown(f"""
+            <div class='med-item'>
+                <h3 style='color:#166534; margin:0 0 15px 0;'>{i+1}. {output.medications[i]}</h3>
+                <p style='margin:8px 0; font-size:18px;'><strong style='color:#2563eb;'>Take →</strong> <strong>{output.sig[i]}</strong></p>
+                <p style='margin:8px 0; font-size:17px;'><strong style='color:#dc2626;'>Dispense →</strong> {output.quantity[i]}</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown(f"<h3 style='text-align:center; color:#dc2626; margin:30px 0 10px 0;'>Duration: <strong>{output.duration}</strong></h3>", unsafe_allow_html=True)
+        st.markdown(f"<h3 style='text-align:center; color:#b91c1c; margin:10px 0;'>Refills: <strong>{output.refills}</strong></h3>", unsafe_allow_html=True)
+        
+        if output.additional_notes:
+            st.markdown(f"""
+            <div style='background:#fff7ed; padding:20px; border-radius:15px; border-left:8px solid #f97316; margin-top:25px;'>
+                <strong style='color:#c2410c;'>⚠️ Important:</strong><br>{output.additional_notes}
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        # Placeholder when no prescription yet
         st.markdown("""
-        <div style='text-align:center; padding:60px; background:#f3f4f6; border-radius:20px; border:3px dashed #94a3b8;'>
-            <h3 style='color:#64748b; margin:0;'>Your prescription will appear here</h3>
-            <p style='color:#94a3b8; font-size:18px; margin:20px 0 0 0;'>Describe your symptoms in the chat below 👇</p>
+        <div style='text-align:center; padding:80px 20px; background:#f8fafc; border-radius:25px; border:4px dashed #94a3b8; margin-top:50px;'>
+            <h3 style='color:#64748b; margin:0;'>🔒 Waiting for your consultation</h3>
+            <p style='color:#94a3b8; font-size:19px; margin:25px 0 0 0;'>
+                Describe your symptoms in the chat below<br>
+                Your prescription will appear here permanently
+            </p>
         </div>
         """, unsafe_allow_html=True)
-    
+
     st.markdown("</div>", unsafe_allow_html=True)
 
-# Chat History
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-    st.session_state.last_prescription = None
+# Chat Interface (below the main area)
+st.markdown("---")
+st.markdown("<h3 style='text-align:center; color:#1e293b; margin:30px 0 10px 0;'>💬 Chat with AI Doctor</h3>", unsafe_allow_html=True)
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"], unsafe_allow_html=True)
 
-# User Input
-if prompt := st.chat_input("🩺 Describe your symptoms or ask for treatment..."):
+if prompt := st.chat_input("🩺 Describe your symptoms or ask for medicine..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("🩺 AI Doctor is preparing your prescription..."):
+        with st.spinner("🩺 AI Doctor is examining and writing your prescription..."):
             try:
                 result = asyncio.run(Runner.run(doctor_agent, prompt, context=patient_context))
                 output = result.final_output
 
                 if isinstance(output, Prescription):
-                    # Update prescription display
-                    st.rerun()  # To refresh the static prescription box
+                    # SAVE TO SESSION STATE SO IT STAYS IN MAIN BOX
+                    st.session_state.current_prescription = output
 
-                    st.success("✅ **Prescription Issued Successfully!**")
+                    st.success("✅ **Prescription Successfully Issued!**")
+                    st.markdown("**Your prescription is now permanently displayed above ↑**")
 
-                    # Display in chat
-                    prescription_html = "<div class='rx-box'>"
-                    prescription_html += """
-                    <div style='text-align:center; margin-bottom:40px;'>
-                        <h1 style='color:#dc2626; font-weight:900;'>AI DOCTOR</h1>
-                        <h3 style='color:#16a34a;'>Virtual Health Clinic • Rourkela, Odisha</h3>
-                    </div>
-                    <div class='rx-header'>Rx</div>
-                    """
+                    # Also show in chat for confirmation
+                    chat_rx = ""
                     for i in range(len(output.medications)):
-                        prescription_html += f"""
-                        <div class='med-item'>
-                            <h3 style='color:#166534;'>{i+1}. {output.medications[i]}</h3>
-                            <p><strong style='color:#2563eb;'>Take →</strong> <strong>{output.sig[i]}</strong></p>
-                            <p><strong style='color:#dc2626;'>Dispense →</strong> {output.quantity[i]}</p>
-                        </div>
-                        """
-                    prescription_html += f"<h3 style='text-align:center; color:#dc2626; margin-top:30px;'>Duration: {output.duration}</h3>"
-                    prescription_html += f"<h3 style='text-align:center; color:#b91c1c;'>Refills: {output.refills}</h3>"
+                        chat_rx += f"**{i+1}. {output.medications[i]}**\n"
+                        chat_rx += f"**Take:** {output.sig[i]}\n"
+                        chat_rx += f"**Dispense:** {output.quantity[i]}\n\n"
+                    chat_rx += f"**Duration:** {output.duration}\n"
+                    chat_rx += f"**Refills:** {output.refills}\n"
                     if output.additional_notes:
-                        prescription_html += f"<div style='background:#fff7ed; padding:20px; border-radius:15px; border-left:8px solid #f97316; margin-top:25px;'><strong style='color:#c2410c;'>⚠️ Note:</strong> {output.additional_notes}</div>"
-                    prescription_html += "</div>"
+                        chat_rx += f"**Note:** {output.additional_notes}"
 
-                    st.markdown(prescription_html, unsafe_allow_html=True)
-                    st.session_state.last_prescription = output
+                    st.markdown(chat_rx)
 
-                    st.warning("💊 Take this prescription to any pharmacy • Follow instructions carefully")
+                    st.warning("💊 Show the prescription above to any pharmacy • Follow dosage strictly")
 
                 elif isinstance(output, GeneralAdvice):
                     st.info("🩺 **Doctor's Advice**")
-                    st.markdown(f"<div style='font-size:18px; line-height:1.8;'>{output.advice}</div>", unsafe_allow_html=True)
+                    st.markdown(output.advice)
                     st.markdown(f"**Follow-up:** {output.follow_up}")
 
                 st.session_state.messages.append({"role": "assistant", "content": str(output)})
 
             except InputGuardrailTripwireTriggered:
-                st.error("⚠️ **Cannot prescribe this medication**\n\nRestricted or requires in-person examination.")
+                st.error("⚠️ **Cannot prescribe this medicine**\n\nIt is restricted or requires in-person checkup.")
             except Exception as e:
-                st.error("System error. Please try again.")
+                st.error("😞 System error. Please try again.")
 
-# Update static prescription box on rerun
-if st.session_state.get("last_prescription"):
-    with col2:
-        st.markdown("<div class='rx-box'>", unsafe_allow_html=True)
-        st.markdown("""
-        <div style='text-align:center; margin-bottom:40px;'>
-            <h1 style='color:#dc2626; font-weight:900;'>AI DOCTOR</h1>
-            <h3 style='color:#16a34a;'>Virtual Health Clinic • Rourkela, Odisha</h3>
-        </div>
-        """, unsafe_allow_html=True)
-        st.markdown("<div class='rx-header'>Rx</div>", unsafe_allow_html=True)
-        
-        output = st.session_state.last_prescription
-        for i in range(len(output.medications)):
-            st.markdown(f"""
-            <div class='med-item'>
-                <h3 style='color:#166534;'>{i+1}. {output.medications[i]}</h3>
-                <p><strong style='color:#2563eb;'>Take →</strong> <strong>{output.sig[i]}</strong></p>
-                <p><strong style='color:#dc2626;'>Dispense →</strong> {output.quantity[i]}</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown(f"<h3 style='text-align:center; color:#dc2626; margin-top:30px;'>Duration: {output.duration}</h3>", unsafe_allow_html=True)
-        st.markdown(f"<h3 style='text-align:center; color:#b91c1c;'>Refills: {output.refills}</h3>", unsafe_allow_html=True)
-        if output.additional_notes:
-            st.info(f"**Important:** {output.additional_notes}")
-        
-        st.markdown("</div>", unsafe_allow_html=True)
+    # Auto-refresh to update the main prescription box
+    st.rerun()
