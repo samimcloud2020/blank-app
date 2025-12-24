@@ -83,7 +83,7 @@ prescription_agent = Agent[PatientContext](
     Current medicines: {ctx.current_medications}
 
     You MUST prescribe medicine for the symptoms.
-    Write exactly like real doctors:
+    Write exactly like real doctors but its a example of style doctor prescribe:
     - Use Tab., Cap., Syrup., etc.
     - Correct strength (e.g., Tab. Paracetamol 650mg, Syrup Cetirizine 5mg/5ml)
     - Real instructions: "One tablet three times daily after food", "10 ml once daily at night"
