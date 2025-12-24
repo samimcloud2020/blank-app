@@ -8,14 +8,14 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv()
-model = os.getenv('LLM_MODEL_NAME', 'gpt-4o-mini')
+model = os.getenv('LLM_MODEL_NAME', 'gpt-4o-mini')  # Use model that supports tools
 
 # --- Models ---
 class Prescription(BaseModel):
-    medications: List[str] = Field(description="Medicine with strength, e.g., 'Tab. Cetirizine 10mg'")
-    sig: List[str] = Field(description="Real doctor style: 'One tablet once daily at night after food'")
+    medications: List[str] = Field(description="e.g., 'Tab. Paracetamol 650mg'")
+    sig: List[str] = Field(description="Real instructions: 'One tablet three times daily after food'")
     duration: str = Field(description="e.g., 'for 5 days'")
-    quantity: List[str] = Field(description="e.g., '#10 (Ten tablets)'")
+    quantity: List[str] = Field(description="e.g., '#15 (Fifteen tablets)'")
     refills: str = "No refills"
     additional_notes: Optional[str] = None
 
@@ -41,71 +41,121 @@ class PatientContext:
 # --- Safety Reviewer ---
 safety_reviewer_agent = Agent(
     name="Safety Reviewer",
-    instructions="Strictly check for correct dosage, concentration, allergies, interactions. Block unsafe or wrong prescriptions.",
+    instructions="""
+    You are a strict medical safety expert.
+    Review prescription for:
+    - Correct dosage and concentration
+    - No allergy conflicts
+    - No dangerous interactions with current medications
+    - Age-appropriate dosing
+    Block if any inaccuracy or risk.
+    """,
     output_type=SafetyAnalysis,
     model=model
 )
 
 async def input_guardrail(ctx: PatientContext, agent, input_data: str):
     try:
-        prompt = f"Patient: {ctx.patient_id}, Age: {ctx.age}, Symptoms: {ctx.current_symptoms}, Allergies: {ctx.allergies}. Message: '{input_data}'. Safe?"
+        prompt = f"Patient: {ctx.patient_id}, Age: {ctx.age}, Symptoms: {ctx.current_symptoms}, Allergies: {ctx.allergies}, Current meds: {ctx.current_medications}. User message: '{input_data}'. Is it safe to prescribe common medicine?"
         result = await Runner.run(safety_reviewer_agent, prompt)
         analysis = result.final_output_as(SafetyAnalysis)
         return GuardrailFunctionOutput(output_info=analysis, tripwire_triggered=not analysis.is_safe)
     except:
-        return GuardrailFunctionOutput(output_info=SafetyAnalysis(is_safe=True, reasoning="Error"), tripwire_triggered=False)
+        return GuardrailFunctionOutput(output_info=SafetyAnalysis(is_safe=True, reasoning="Guardrail error"), tripwire_triggered=False)
 
 async def output_guardrail(ctx: PatientContext, agent, input_data: str, output_data):
     try:
-        prompt = f"Review: {str(output_data)}\nPatient: {ctx.patient_id}, Allergies: {ctx.allergies}, Current meds: {ctx.current_medications}. Is it safe and accurate?"
+        prompt = f"""
+        Review this prescription:
+        {str(output_data)}
+        
+        Patient profile:
+        Name: {ctx.patient_id}
+        Age: {ctx.age}
+        Allergies: {ctx.allergies}
+        Current medications: {ctx.current_medications}
+        
+        Is the dosage, concentration, and medication choice 100% safe and accurate?
+        """
         result = await Runner.run(safety_reviewer_agent, prompt)
         analysis = result.final_output_as(SafetyAnalysis)
         if not analysis.is_safe:
-            safe = GeneralAdvice(advice="Cannot prescribe — unsafe or inaccurate.", follow_up="See doctor in person.")
+            safe = GeneralAdvice(
+                advice="I cannot provide this prescription as it may be unsafe or inaccurate. Please consult a doctor in person.",
+                follow_up="Visit a nearby clinic for proper evaluation."
+            )
             return GuardrailFunctionOutput(output_info=safe, tripwire_triggered=True, override_output=safe)
         return GuardrailFunctionOutput(output_info=analysis, tripwire_triggered=False)
     except:
-        fallback = GeneralAdvice(advice="Safety error.", follow_up="See doctor.")
+        fallback = GeneralAdvice(advice="Safety system error.", follow_up="Consult a doctor.")
         return GuardrailFunctionOutput(output_info=fallback, tripwire_triggered=True, override_output=fallback)
 
-# --- Real-World Prescription Doctor ---
+# --- Official OpenAI Web Search Tool ---
+web_search_tool = {
+    "type": "function",
+    "function": {
+        "name": "search",
+        "description": "Search the web for accurate medical information: drug dosage, concentration, side effects, interactions, guidelines in India.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Specific query, e.g., 'Paracetamol 650mg dosage for adults India', 'Cetirizine 10mg tablet uses and side effects'"
+                }
+            },
+            "required": ["query"]
+        }
+    }
+}
+
+# --- Prescription Doctor - Uses Web Search + Patient Context ---
 prescription_agent = Agent[PatientContext](
     name="Prescription Doctor",
     instructions="""
     You are a senior family physician in Rourkela, Odisha writing real prescriptions.
 
-    Patient:
-    Name: {ctx.patient_id}
-    Age: {ctx.age}
-    Gender: {ctx.gender}
-    Symptoms: {ctx.current_symptoms}
-    Allergies: {ctx.allergies}
-    Current medicines: {ctx.current_medications}
+    Patient Profile:
+    - Name: {ctx.patient_id}
+    - Age: {ctx.age}
+    - Gender: {ctx.gender}
+    - Symptoms: {ctx.current_symptoms}
+    - Allergies: {ctx.allergies}
+    - Current medications: {ctx.current_medications}
 
     You MUST prescribe medicine for the symptoms.
-    Write exactly like real doctors but its a example of style doctor prescribe:
-    - Use Tab., Cap., Syrup., etc.
-    - Correct strength (e.g., Tab. Paracetamol 650mg, Syrup Cetirizine 5mg/5ml)
-    - Real instructions: "One tablet three times daily after food", "10 ml once daily at night"
-    - Duration: "for 3 days", "for 5 days"
-    - Quantity: "#15 (Fifteen)", "#100 ml (One hundred ml)"
-    - Add notes: "Take with water", "Avoid alcohol", "If no improvement in 3 days, consult doctor"
 
-    Be natural, caring, and professional.
-    Vary wording but always accurate.
+    Before prescribing:
+    - Use the 'search' tool to verify correct dosage, concentration, and safety from reliable sources.
+    - Search for: drug name + dosage + India, side effects, interactions with current meds.
+
+    Write in real doctor style:
+    - Tab., Cap., Syrup.
+    - Correct strength (e.g., Tab. Paracetamol 650mg, Syrup Cetirizine 5mg/5ml)
+    - Clear instructions: "One tablet three times daily after food", "10 ml once daily at night before sleep"
+    - Duration: "for 3 days"
+    - Quantity: "#15 (Fifteen tablets)", "#100 ml (One hundred ml)"
+    - Add caring notes: "Take plenty of water", "Rest well", "Consult doctor if no improvement"
+
+    Always be accurate, professional, and caring.
+    Vary wording naturally.
     """,
     model=model,
-    output_type=Prescription
+    output_type=Prescription,
+    tools=[web_search_tool]  # Uses web search for accuracy
 )
 
-# --- Main Doctor - Always Prescribes ---
+# --- Main Doctor - Always Prescribes Medicine ---
 doctor_agent = Agent[PatientContext](
     name="AI Doctor",
     instructions="""
-    You are a caring doctor.
-    The patient has entered symptoms and profile.
-    Always hand off to Prescription Doctor to write a real Rx prescription.
-    Do not give only advice — prescribe medicine.
+    You are a compassionate virtual doctor.
+    
+    Patient has provided full profile and symptoms.
+    Your job is to prescribe medicine safely.
+    
+    Always hand off to Prescription Doctor — who will use web search to verify accuracy.
+    Never give only advice — always result in a prescription.
     """,
     model=model,
     handoffs=[prescription_agent],
