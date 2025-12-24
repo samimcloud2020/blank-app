@@ -98,7 +98,9 @@ prescription_agent = Agent[PatientContext](
     1. Check age, symptoms, allergies
     2. Choose correct medicine and form (prefer tablet for adults)
     3. Calculate exact dose accurately
-    4. Write clear instructions with timing and food relation
+    4. Write clear instructions with timing and food relation.
+    5. Give medicine for all symptoms. pls look carefully.
+    6. Advice patients also.
     
     Be natural, vary responses, but always accurate.
     """,
