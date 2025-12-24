@@ -6,19 +6,19 @@ from typing import List, Optional
 from dataclasses import dataclass
 from dotenv import load_dotenv
 import os
-from datetime import date
 
 load_dotenv()
 model = os.getenv('LLM_MODEL_NAME', 'gpt-4o-mini')
 
 # --- Realistic Prescription Model ---
 class Prescription(BaseModel):
-    """Real-life style prescription"""
-    rx_items: List[str] = Field(description="List of medications in Rx format (e.g., 'Tab. Ibuprofen 400mg')")
-    sig: List[str] = Field(description="Directions for each drug (e.g., '1 tab three times daily after food')")
-    quantity: List[str] = Field(description="Dispense quantity (e.g., '#30 (thirty)')")
-    refills: str = Field(default="No refills", description="Refills allowed")
-    notes: Optional[str] = Field(default=None, description="Additional doctor notes or warnings")
+    """Professional real-life prescription format"""
+    medications: List[str] = Field(description="Medication name with strength, e.g., 'Tab. Paracetamol 500mg'")
+    sig: List[str] = Field(description="Full instructions: dosage, timing, relation to food, e.g., 'One tablet three times daily after food'")
+    duration: str = Field(description="How many days, e.g., 'for 5 days'")
+    quantity: List[str] = Field(description="Dispense amount, e.g., '#15 (Fifteen)'")
+    refills: str = Field(default="No refills")
+    additional_notes: Optional[str] = Field(default=None, description="Warnings, side effects, when to stop, etc.")
 
 class GeneralAdvice(BaseModel):
     advice: str
@@ -43,13 +43,10 @@ class PatientContext:
 safety_reviewer_agent = Agent(
     name="Medical Safety Reviewer",
     instructions="""
-    APPROVE only safe, common medications:
-    - Ibuprofen, Acetaminophen, Amoxicillin, Cetirizine, Omeprazole, Azithromycin, etc.
-    
-    BLOCK:
-    - Opioids, Benzodiazepines, Stimulants, Sleeping pills, Weight loss drugs
-    - Drug-seeking or demanding specific controlled meds
-    - Ignoring allergies
+    APPROVE only safe, common medications.
+    ALLOW: Paracetamol, Ibuprofen, Cetirizine, Amoxicillin, Omeprazole, Azithromycin, Syrups like cough syrup, etc.
+    BLOCK: Opioids, Benzodiazepines, Steroids, Sleeping pills, Adderall, etc.
+    Check allergies carefully.
     """,
     output_type=SafetyAnalysis,
     model=model
@@ -57,7 +54,7 @@ safety_reviewer_agent = Agent(
 
 async def input_guardrail(ctx: PatientContext, agent, input_data: str):
     try:
-        prompt = f"Patient asks: '{input_data}'. Allergies: {ctx.allergies}. Is this safe to proceed (no controlled drugs)? Yes/No and reason."
+        prompt = f"Patient: '{input_data}' | Allergies: {ctx.allergies} | Safe to prescribe common medicine? No controlled drugs."
         result = await Runner.run(safety_reviewer_agent, prompt)
         analysis = result.final_output_as(SafetyAnalysis)
         return GuardrailFunctionOutput(output_info=analysis, tripwire_triggered=not analysis.is_safe)
@@ -67,39 +64,42 @@ async def input_guardrail(ctx: PatientContext, agent, input_data: str):
 async def output_guardrail(ctx: PatientContext, agent, input_data: str, output_data):
     try:
         output_str = str(output_data)
-        prompt = f"Review response:\n{output_str}\nPatient allergies: {ctx.allergies}\nSafe? Only common meds allowed."
+        prompt = f"Review prescription:\n{output_str}\nAllergies: {ctx.allergies}\nOnly common safe drugs allowed?"
         result = await Runner.run(safety_reviewer_agent, prompt)
         analysis = result.final_output_as(SafetyAnalysis)
         if not analysis.is_safe:
             safe = GeneralAdvice(
-                advice="I cannot prescribe that medication as it is restricted or unsafe without in-person evaluation.",
-                follow_up="Please consult a doctor in person."
+                advice="I cannot prescribe this medication as it is restricted or unsafe without physical examination.",
+                follow_up="Please visit a nearby doctor immediately."
             )
             return GuardrailFunctionOutput(output_info=safe, tripwire_triggered=True, override_output=safe)
         return GuardrailFunctionOutput(output_info=analysis, tripwire_triggered=False)
     except:
-        fallback = GeneralAdvice(advice="Safety check failed.", follow_up="See a doctor.")
+        fallback = GeneralAdvice(advice="Safety error.", follow_up="See a doctor.")
         return GuardrailFunctionOutput(output_info=fallback, tripwire_triggered=True, override_output=fallback)
 
-# --- Prescription Agent (Writes in Real Doctor Format) ---
+# --- Prescription Doctor Agent (Writes Full Detailed Instructions) ---
 prescription_agent = Agent[PatientContext](
     name="Prescription Doctor",
     instructions="""
-    You are a professional doctor writing a real prescription.
-    
-    Format exactly like real life:
-    
-    Rx
-    1. Tab. [Medication] [Strength]
-       Sig: [dosage instructions in full sentences]
-       Disp: #[number] ([written in words])
-    
-    2. Next drug...
-    
-    Refills: No refills (or number)
-    
-    Use proper medical abbreviations and formal tone.
-    Always check allergies before prescribing.
+    You are a senior doctor writing a professional prescription in India.
+
+    Write clearly with full instructions:
+    - How many tablets/syrup (e.g., One tablet, 10 ml)
+    - How many times a day (morning, afternoon, night)
+    - Before or after food
+    - Duration (for 3 days, 5 days, etc.)
+    - Quantity in numbers and words
+
+    Example:
+    Tab. Paracetamol 650mg
+    → One tablet three times daily after food for 3 days
+
+    Syrup. Ascoril LS
+    → 10 ml three times daily after food for 5 days
+
+    Always check allergies.
+    Use proper medical format.
     """,
     model=model,
     output_type=Prescription
@@ -107,18 +107,18 @@ prescription_agent = Agent[PatientContext](
 
 advice_agent = Agent[PatientContext](
     name="General Advisor",
-    instructions="Give caring, evidence-based advice with clear red flags.",
+    instructions="Give caring, detailed advice with home care and red flags.",
     model=model,
     output_type=GeneralAdvice
 )
 
-# --- Main Doctor ---
+# --- Main Virtual Doctor ---
 doctor_agent = Agent[PatientContext](
-    name="Dr. AI - Virtual Physician",
+    name="AI Doctor",
     instructions="""
-    You are a compassionate, board-certified virtual doctor.
-    If patient needs medication → hand off to Prescription Doctor.
-    Otherwise → General Advisor.
+    You are a kind, experienced virtual doctor.
+    If patient needs medicine → hand off to Prescription Doctor.
+    Otherwise → give advice via General Advisor.
     """,
     model=model,
     handoffs=[prescription_agent, advice_agent],
