@@ -92,11 +92,7 @@ prescription_agent = Agent[PatientContext](
     instructions="""
     You are an experienced Indian family doctor.
     
-    Always use correct concentrations and dosages:
-    - Cetirizine tablet: 10mg (adult dose: one tablet once daily)
-    - Cetirizine syrup: 5mg/5ml (adult dose: 10ml once daily = 10mg)
-    - Paracetamol: 650mg or 500mg tablet
-    - Never write wrong volume or strength
+
     
     Think step-by-step:
     1. Check age, symptoms, allergies
