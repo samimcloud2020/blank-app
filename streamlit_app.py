@@ -1,189 +1,159 @@
 # streamlit_app.py
 import asyncio
-import os
 import streamlit as st
+from main import UserContext, Runner, fitness_agent, InputGuardrailTripwireTriggered, WorkoutPlan, MealPlan
 
-# Import from your main.py
-from main import (
-    UserContext,
-    Runner,
-    fitness_agent,
-    InputGuardrailTripwireTriggered,
-    WorkoutPlan,
-    MealPlan,
-)
-
-# ==============================================
-# Page Configuration
-# ==============================================
+# ===================================
+# Page Setup - Modern & Colorful
+# ===================================
 st.set_page_config(
-    page_title="AI Fitness Coach",
-    page_icon="🏋️",
+    page_title="💪 AI Fitness Coach Pro",
+    page_icon="💪",
     layout="centered",
     initial_sidebar_state="expanded",
 )
 
-st.title("🏋️‍♂️ Your Personal AI Fitness Coach")
-st.markdown("Get safe, personalized workout and nutrition advice powered by AI.")
-
-# ==============================================
-# Sidebar: User Profile (UserContext)
-# ==============================================
-with st.sidebar:
-    st.header("👤 Your Profile")
-
-    user_id = st.text_input("Name/ID (optional)", value="User", placeholder="e.g., Alex")
-
-    st.subheader("Fitness Level")
-    fitness_level = st.selectbox(
-        "Your current fitness level",
-        options=["beginner", "intermediate", "advanced"],
-        index=0,
-        help="Beginner: little/no experience | Intermediate: regular training | Advanced: years of consistent training"
-    )
-
-    st.subheader("Primary Goal")
-    fitness_goal = st.selectbox(
-        "What do you want to achieve?",
-        options=[
-            "weight loss",
-            "muscle gain",
-            "general fitness",
-            "strength",
-            "endurance",
-            "toning",
-            "mobility/flexibility"
-        ],
-        index=0
-    )
-
-    st.subheader("Dietary Preferences")
-    dietary_preference = st.selectbox(
-        "Any dietary restrictions?",
-        options=[
-            "no restrictions",
-            "vegetarian",
-            "vegan",
-            "pescatarian",
-            "keto",
-            "paleo",
-            "gluten-free"
-        ],
-        index=0
-    )
-
-    st.subheader("Available Equipment")
-    st.caption("Check all that you have access to")
-
-    equipment_mapping = {
-        "none / bodyweight only": "None",
-        "dumbbells": "Dumbbells",
-        "resistance bands": "Resistance Bands",
-        "barbell": "Barbell & Plates",
-        "pull-up bar": "Pull-up Bar",
-        "bench": "Workout Bench",
-        "kettlebell": "Kettlebell",
-        "yoga mat": "Yoga Mat",
-        "gym access": "Full Gym Access",
+# Custom CSS for bold, colorful sidebar
+st.markdown("""
+<style>
+    .css-1d391kg {padding-top: 1rem;}
+    .sidebar .sidebar-content {
+        background: linear-gradient(180deg, #1e1e2e, #2d1b69);
+        color: white;
     }
+    .stSelectbox > div > div {background-color: #3b2a8a !important; color: white;}
+    .stTextInput > div > div > input {background-color: #4a3b9e; color: white;}
+    h1, h2, h3 {color: #ff6b6b;}
+    .stSuccess {background-color: #2ecc71; color: white;}
+</style>
+""", unsafe_allow_html=True)
 
-    selected_equipment = []
-    for key, label in equipment_mapping.items():
-        if st.checkbox(label, key=f"eq_{key}"):
-            selected_equipment.append(key)
+st.title("💪 **Your Personal AI Fitness Coach**")
+st.markdown("### Safe • Personalized • Science-Backed Fitness Guidance")
 
-    if not selected_equipment:
-        selected_equipment = ["none / bodyweight only"]
+# ===================================
+# Sidebar - Colorful & Bold
+# ===================================
+with st.sidebar:
+    st.markdown("""
+    <div style='text-align: center; padding: 10px;'>
+        <h2 style='color:#ff6b6b; margin:0;'>👤 YOUR PROFILE</h2>
+        <p style='color:#a29bfe;'>Customize your plan</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    # Create UserContext
+    st.markdown("---")
+
+    name = st.text_input("**Your Name**", placeholder="e.g., Alex", value="")
+
+    st.markdown("#### 🎯 **Fitness Level**")
+    fitness_level = st.selectbox(
+        "Choose your level",
+        ["beginner", "intermediate", "advanced"],
+        help="Be honest — better results come from accurate starting point!"
+    )
+
+    st.markdown("#### 🏆 **Main Goal**")
+    fitness_goal = st.selectbox(
+        "What are you working toward?",
+        ["weight loss", "muscle gain", "general fitness", "strength", "endurance", "toning", "mobility/flexibility"]
+    )
+
+    st.markdown("#### 🍎 **Diet Preference**")
+    dietary_preference = st.selectbox(
+        "Any dietary needs?",
+        ["no restrictions", "vegetarian", "vegan", "pescatarian", "keto", "gluten-free"]
+    )
+
+    st.markdown("#### 🏋️ **Equipment Available**")
+    cols = st.columns(2)
+    equipment = []
+    options = ["dumbbells", "resistance bands", "barbell", "pull-up bar", "bench", "kettlebell", "gym access"]
+    labels = ["Dumbbells", "Bands", "Barbell", "Pull-up Bar", "Bench", "Kettlebell", "Full Gym"]
+
+    for i, (opt, label) in enumerate(zip(options, labels)):
+        if cols[i % 2].checkbox(label, key=opt):
+            equipment.append(opt)
+    if not equipment:
+        equipment = ["none / bodyweight only"]
+
+    # Create context
     user_context = UserContext(
-        user_id=user_id or "anonymous",
+        user_id=name or "User",
         fitness_level=fitness_level,
         fitness_goal=fitness_goal,
         dietary_preference=dietary_preference,
-        available_equipment=selected_equipment,
+        available_equipment=equipment
     )
 
-    st.divider()
-    st.success("✅ Profile Ready!")
-    st.caption(f"Goal: **{fitness_goal.title()}** • Level: **{fitness_level.title()}**")
+    st.markdown("---")
+    st.markdown(f"""
+    <div style='text-align:center; background:#ff6b6b; padding:10px; border-radius:10px;'>
+        <h3 style='color:white; margin:0;'>✅ READY TO TRAIN!</h3>
+        <p style='color:white; margin:5px;'><strong>{fitness_goal.title()}</strong> mode activated</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-# ==============================================
-# Chat History & Interface
-# ==============================================
+# ===================================
+# Chat Interface
+# ===================================
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display previous messages
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-# User input
-if prompt := st.chat_input("Ask about workouts, diet, motivation, or anything fitness-related..."):
-    # Add user message
+if prompt := st.chat_input("💬 Ask me for a workout, meal plan, tips, or motivation..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Generate assistant response
     with st.chat_message("assistant"):
-        with st.spinner("Creating your personalized plan..."):
+        with st.spinner("🤖 Crafting your personalized plan..."):
             try:
-                # Run the agent
                 result = asyncio.run(Runner.run(fitness_agent, prompt, context=user_context))
-                final_output = result.final_output
+                output = result.final_output
 
-                response_text = ""
+                if isinstance(output, WorkoutPlan):
+                    st.success("💥 **Your Custom Workout Plan**")
+                    for ex in output.exercises:
+                        st.markdown(f"**• {ex}**")
+                    st.info(f"**📋 Coach's Notes:** {output.notes}")
 
-                # Handle WorkoutPlan
-                if isinstance(final_output, WorkoutPlan):
-                    st.success("💪 Your Custom Workout Plan")
-                    st.write("**Exercises:**")
-                    for exercise in final_output.exercises:
-                        st.markdown(f"• {exercise}")
-                    st.info(f"📝 **Tips & Notes:** {final_output.notes}")
-                    response_text = f"**Workout Plan**\n\nExercises:\n" + "\n".join(f"- {e}" for e in final_output.exercises) + f"\n\nNotes: {final_output.notes}"
+                elif isinstance(output, MealPlan):
+                    st.success("🍱 **Your Custom Meal Plan**")
+                    st.markdown(f"**🔥 Daily Calories:** {output.daily_calories}")
+                    for meal in output.meal_suggestions:
+                        st.markdown(f"**🍴 {meal}**")
+                    st.info(f"**🥗 Nutrition Tips:** {output.notes}")
 
-                # Handle MealPlan
-                elif isinstance(final_output, MealPlan):
-                    st.success("🍎 Your Custom Meal Plan")
-                    st.markdown(f"**Target Daily Calories:** `{final_output.daily_calories}`")
-                    st.write("**Meal Ideas:**")
-                    for meal in final_output.meal_suggestions:
-                        st.markdown(f"• {meal}")
-                    st.info(f"📝 **Nutrition Advice:** {final_output.notes}")
-                    response_text = f"**Meal Plan**\n\nDaily Calories: {final_output.daily_calories}\n\nMeals:\n" + "\n".join(f"- {m}" for m in final_output.meal_suggestions) + f"\n\nNotes: {final_output.notes}"
-
-                # Fallback: plain text
                 else:
-                    st.markdown(final_output)
-                    response_text = str(final_output)
+                    st.markdown(output)
 
-                # Save to session
-                st.session_state.messages.append({"role": "assistant", "content": response_text})
+                st.session_state.messages.append({"role": "assistant", "content": str(output)})
 
             except InputGuardrailTripwireTriggered as e:
-                # Fixed: correctly access guardrail_output.reasoning
                 analysis = getattr(e, "guardrail_output", None)
-                reason = getattr(analysis, "reasoning", "Unrealistic or unsafe goal detected.") if analysis else "Unsafe goal detected."
+                reason = getattr(analysis, "reasoning", "This involves potentially unsafe methods.")
 
-                warning_msg = f"""
-                ⚠️ **Safety Guardrail Activated**
+                st.error(f"""
+                🚨 **Safety Alert**
 
-                Your request involves a goal that may be **unsafe or unrealistic**.
+                I'm here to help you reach your goals **safely**.
 
-                **Reason:** {reason}
+                **⚠️ Issue Detected:** {reason}
 
-                💡 **Healthy Reminder:**  
-                Safe, sustainable weight loss is 0.5–2 pounds per week. Extreme rapid changes can harm your health.
+                I cannot assist with steroids, dangerous drugs, or extreme crash diets.
 
-                Let me help you create a **safe and effective** long-term plan instead!
-                """
-                st.error(warning_msg)
-                st.session_state.messages.append({"role": "assistant", "content": warning_msg})
+                Let's build a **healthy, sustainable plan** that gets real results — safely and for the long term.
+
+                Try asking:  
+                • "Give me a beginner workout plan"  
+                • "Safe meal plan for weight loss"  
+                • "How can I build muscle naturally?"
+                """)
+                st.session_state.messages.append({"role": "assistant", "content": "Safety guardrail triggered: Dangerous request blocked."})
 
             except Exception as e:
-                error_msg = "😕 Sorry, something went wrong. Please try again."
-                st.error(error_msg + f" (Details: {str(e)})")
-                st.session_state.messages.append({"role": "assistant", "content": error_msg})
+                st.error("😕 Something went wrong. Please try again!")
