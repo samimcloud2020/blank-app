@@ -2,124 +2,178 @@
 import asyncio
 import os
 import streamlit as st
-from pydantic import BaseModel, Field
-from typing import List
 
-# ───────────────────────────────────────────────
-#   Assuming your agent-related classes are in a separate file
-#   (you can also keep them here if you prefer one-file solution)
-# ───────────────────────────────────────────────
-
-# We'll import your existing modules — adjust paths/names as needed
-try:
-    from main import (
-        UserContext,
-        fitness_agent,
-        Runner,
-        InputGuardrailTripwireTriggered,
-        WorkoutPlan,
-        MealPlan,
-        # goal_analysis_agent, fitness_goal_guardrail, etc. if needed
-    )
-except ImportError:
-    st.error("Could not import from main.py — please check file structure")
-    st.stop()
-
-# ───────────────────────────────────────────────
-#   Page config
-# ───────────────────────────────────────────────
-st.set_page_config(
-    page_title="Fitness Coach Agent",
-    page_icon="🏋️",
-    layout="wide"
+from main import (
+    UserContext,
+    Runner,
+    fitness_agent,
+    InputGuardrailTripwireTriggered,
+    WorkoutPlan,
+    MealPlan,
 )
 
-st.title("🏋️ Fitness Coach Agent Demo")
-st.markdown("Ask anything about workouts, nutrition, or general fitness!")
+# ───────────────────────────────────────────────
+# Page Config
+# ───────────────────────────────────────────────
+st.set_page_config(
+    page_title="AI Fitness Coach",
+    page_icon="🏋️",
+    layout="centered",
+    initial_sidebar_state="expanded",
+)
+
+st.title("🏋️‍♂️ Your Personal AI Fitness Coach")
+st.markdown("Get personalized workout and nutrition advice based on your goals and setup!")
 
 # ───────────────────────────────────────────────
-#   Sidebar — User Profile
+# Sidebar: User Context (Profile)
 # ───────────────────────────────────────────────
 with st.sidebar:
-    st.header("Your Profile")
-    
-    user_id = st.text_input("User ID", value="user123")
-    fitness_level = st.selectbox("Fitness Level", ["beginner", "intermediate", "advanced"], index=0)
-    fitness_goal = st.selectbox("Main Goal", ["weight loss", "muscle gain", "general fitness", "strength", "endurance"])
-    dietary_preference = st.selectbox("Dietary Preference", ["no restrictions", "vegetarian", "vegan", "keto"])
-    
+    st.header("👤 Your Fitness Profile")
+
+    # --- Basic Info ---
+    st.subheader("Personal Info")
+    user_id = st.text_input("Name or ID (optional)", value="User", placeholder="e.g., Alex")
+
+    # --- Fitness Level ---
+    st.subheader("Current Level")
+    fitness_level = st.selectbox(
+        "How would you describe your fitness level?",
+        options=["beginner", "intermediate", "advanced"],
+        index=0,
+        help="Beginner: New to exercise | Intermediate: Regular but not advanced | Advanced: Training consistently for years"
+    )
+
+    # --- Goal ---
+    st.subheader("Main Goal")
+    fitness_goal = st.selectbox(
+        "What is your primary fitness goal?",
+        options=[
+            "weight loss",
+            "muscle gain",
+            "general fitness",
+            "strength",
+            "endurance",
+            "toning",
+            "improved mobility"
+        ],
+        index=0
+    )
+
+    # --- Diet ---
+    st.subheader("Dietary Preferences")
+    dietary_preference = st.selectbox(
+        "Do you follow any specific diet?",
+        options=[
+            "no restrictions",
+            "vegetarian",
+            "vegan",
+            "pescatarian",
+            "keto",
+            "paleo",
+            "gluten-free"
+        ],
+        index=0
+    )
+
+    # --- Equipment ---
     st.subheader("Available Equipment")
-    equipment_options = ["dumbbells", "resistance bands", "barbell", "pull-up bar", "bench", "none / bodyweight only"]
-    available_equipment = st.multiselect("Select equipment you have", equipment_options, default=["dumbbells", "resistance bands"])
-    
+    st.caption("Select everything you have access to")
+
+    equipment_options = {
+        "none / bodyweight only": "None",
+        "dumbbells": "Dumbbells",
+        "resistance bands": "Resistance Bands",
+        "barbell": "Barbell & Plates",
+        "pull-up bar": "Pull-up Bar",
+        "bench": "Workout Bench",
+        "kettlebell": "Kettlebell",
+        "yoga mat": "Yoga Mat",
+        "gym access": "Full Gym Access"
+    }
+
+    selected_equipment = []
+    for key, label in equipment_options.items():
+        if st.checkbox(label, key=f"eq_{key}"):
+            selected_equipment.append(key)
+
+    if not selected_equipment:
+        selected_equipment = ["none / bodyweight only"]
+
+    # --- Create UserContext ---
     user_context = UserContext(
-        user_id=user_id,
+        user_id=user_id or "anonymous",
         fitness_level=fitness_level,
         fitness_goal=fitness_goal,
         dietary_preference=dietary_preference,
-        available_equipment=available_equipment
+        available_equipment=selected_equipment
     )
 
+    st.divider()
+    st.success("✅ Profile ready!")
+    st.caption(f"Goal: {fitness_goal.title()} | Level: {fitness_level.title()}")
+
 # ───────────────────────────────────────────────
-#   Chat interface
+# Main Chat Interface
 # ───────────────────────────────────────────────
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Display chat history
 for message in st.session_state.messages:
-    role = "user" if message["role"] == "user" else "assistant"
-    avatar = "👤" if role == "user" else "🏋️"
-    with st.chat_message(role, avatar=avatar):
+    with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
 # Chat input
-if prompt := st.chat_input("Ask me anything about fitness..."):
+if prompt := st.chat_input("Ask about workouts, diet, tips, or motivation..."):
+    # Add user message
     st.session_state.messages.append({"role": "user", "content": prompt})
-    
-    with st.chat_message("user", avatar="👤"):
+    with st.chat_message("user"):
         st.markdown(prompt)
-    
-    with st.chat_message("assistant", avatar="🏋️"):
+
+    # Assistant response
+    with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             try:
-                # Run the agent asynchronously
                 result = asyncio.run(
                     Runner.run(fitness_agent, prompt, context=user_context)
                 )
-                
+
                 final_output = result.final_output
-                
+
+                response_text = ""
                 if isinstance(final_output, WorkoutPlan):
-                    st.markdown("**🧘‍♂️ Workout Plan**")
-                    st.write("**Exercises:**")
+                    st.success("💪 Personalized Workout Plan")
+                    st.write("**Recommended Exercises:**")
                     for ex in final_output.exercises:
-                        st.markdown(f"- {ex}")
-                    st.markdown(f"**Notes:** {final_output.notes}")
-                
+                        st.markdown(f"• {ex}")
+                    st.info(f"📝 **Notes:** {final_output.notes}")
+                    response_text = f"**Workout Plan**\nExercises: {', '.join(final_output.exercises)}\nNotes: {final_output.notes}"
+
                 elif isinstance(final_output, MealPlan):
-                    st.markdown("**🍽️ Nutrition Plan**")
-                    st.markdown(f"**Daily calories:** {final_output.daily_calories}")
-                    st.write("**Meal suggestions:**")
+                    st.success("🍎 Personalized Meal Plan")
+                    st.write(f"**Target Daily Calories:** {final_output.daily_calories}")
+                    st.write("**Meal Ideas:**")
                     for meal in final_output.meal_suggestions:
-                        st.markdown(f"- {meal}")
-                    st.markdown(f"**Notes:** {final_output.notes}")
-                
+                        st.markdown(f"• {meal}")
+                    st.info(f"📝 **Advice:** {final_output.notes}")
+                    response_text = f"**Meal Plan**\nCalories: {final_output.daily_calories}\nMeals: {', '.join(final_output.meal_suggestions)}\nNotes: {final_output.notes}"
+
                 else:
-                    # Generic response
+                    # Plain text response
                     st.markdown(final_output)
-                
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": str(final_output)
-                })
-                
+                    response_text = str(final_output)
+
+                # Save to history
+                st.session_state.messages.append({"role": "assistant", "content": response_text})
+
             except InputGuardrailTripwireTriggered as e:
-                reason = getattr(e.guardrail_output, 'reasoning', "Unrealistic or unsafe goal detected.")
-                msg = f"⚠️ **Safety guardrail triggered**\n\n{reason}"
-                st.error(msg)
-                st.session_state.messages.append({"role": "assistant", "content": msg})
-                
+                reason = getattr(e.guardrail_output, "reasoning", "Unrealistic or unsafe goal detected.")
+                warning_msg = f"⚠️ **Safety Alert**\n\nYour goal appears unsafe or unrealistic.\n\n**Reason:** {reason}\n\nPlease aim for sustainable progress (e.g., 0.5–2 lbs per week for weight loss)."
+                st.error(warning_msg)
+                st.session_state.messages.append({"role": "assistant", "content": warning_msg})
+
             except Exception as e:
-                error_msg = f"Error: {str(e)}"
+                error_msg = f"😕 Sorry, something went wrong: {str(e)}"
                 st.error(error_msg)
                 st.session_state.messages.append({"role": "assistant", "content": error_msg})
