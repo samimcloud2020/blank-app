@@ -12,12 +12,12 @@ model = os.getenv('LLM_MODEL_NAME', 'gpt-4o-mini')
 
 # --- Models ---
 class Prescription(BaseModel):
-    medications: List[str] = Field(description="e.g., 'Tab. Paracetamol 650mg'")
-    sig: List[str] = Field(description="Full instructions, e.g., 'One tablet three times daily after food'")
-    duration: str = Field(description="e.g., 'for 5 days'")
-    quantity: List[str] = Field(description="e.g., '#15 (Fifteen)'")
+    medications: List[str] = Field(description="Medication with correct strength, e.g., 'Tab. Cetirizine 10mg' or 'Syrup Cetirizine 5mg/5ml'")
+    sig: List[str] = Field(description="Accurate instructions, e.g., 'One tablet once daily in the evening' or '10 ml once daily in the evening for 10mg dose'")
+    duration: str = Field(description="Correct duration, e.g., 'for 7 days'")
+    quantity: List[str] = Field(description="Accurate dispense, e.g., '#10 (Ten tablets)' or '#100 ml (One hundred ml)'")
     refills: str = Field(default="No refills")
-    additional_notes: Optional[str] = Field(default=None)
+    additional_notes: Optional[str] = Field(default=None, description="Important accurate warnings")
 
 class GeneralAdvice(BaseModel):
     advice: str
@@ -38,13 +38,20 @@ class PatientContext:
     allergies: List[str]
     current_medications: List[str]
 
-# --- Safety Reviewer ---
+# --- Safety Reviewer - Strict Accuracy Check ---
 safety_reviewer_agent = Agent(
     name="Safety Reviewer",
     instructions="""
-    Approve only safe common medications: Paracetamol, Ibuprofen, Cetirizine, Amoxicillin, Omeprazole, cough syrups, etc.
-    Block opioids, benzodiazepines, stimulants, steroids, weight loss drugs.
-    Check allergies and interactions.
+    You are a strict medical accuracy and safety expert.
+    
+    Check for:
+    - Correct medication concentrations (e.g., Cetirizine syrup is 5mg/5ml, dose 10ml for 10mg)
+    - Accurate dosages based on age (10mg for adults, 5mg for children 6-12)
+    - No wrong calculations or unsafe advice
+    - Prefer tablets for adults (Tab. Cetirizine 10mg)
+    - Block if any error in dosage, concentration, or safety
+    
+    Only approve if 100% accurate and safe.
     """,
     output_type=SafetyAnalysis,
     model=model
@@ -52,7 +59,7 @@ safety_reviewer_agent = Agent(
 
 async def input_guardrail(ctx, agent, input_data):
     try:
-        prompt = f"Patient says: '{input_data}'. Allergies: {ctx.allergies}. Safe to proceed with common meds?"
+        prompt = f"Patient says: '{input_data}'. Allergies: {ctx.allergies}. Is this safe and accurate for common meds?"
         result = await Runner.run(safety_reviewer_agent, prompt)
         analysis = result.final_output_as(SafetyAnalysis)
         return GuardrailFunctionOutput(output_info=analysis, tripwire_triggered=not analysis.is_safe)
@@ -61,47 +68,64 @@ async def input_guardrail(ctx, agent, input_data):
 
 async def output_guardrail(ctx, agent, input_data, output_data):
     try:
-        prompt = f"Review response: {str(output_data)}. Allergies: {ctx.allergies}. Only safe meds allowed?"
+        prompt = f"Review response: {str(output_data)}. Allergies: {ctx.allergies}. Is dosage/concentration accurate and safe?"
         result = await Runner.run(safety_reviewer_agent, prompt)
         analysis = result.final_output_as(SafetyAnalysis)
         if not analysis.is_safe:
-            safe = GeneralAdvice(advice="Cannot prescribe — unsafe or restricted.", follow_up="See doctor in person.")
+            safe = GeneralAdvice(advice="Cannot provide — potential inaccuracy or unsafe. See doctor in person.", follow_up="Consult a physician.")
             return GuardrailFunctionOutput(output_info=safe, tripwire_triggered=True, override_output=safe)
         return GuardrailFunctionOutput(output_info=analysis, tripwire_triggered=False)
     except:
-        fallback = GeneralAdvice(advice="Safety error.", follow_up="Consult doctor.")
+        fallback = GeneralAdvice(advice="Safety error.", follow_up="See doctor.")
         return GuardrailFunctionOutput(output_info=fallback, tripwire_triggered=True, override_output=fallback)
 
-# --- Prescription Doctor - Varied & Natural ---
+# --- Prescription Agent - Accurate & Varied ---
 prescription_agent = Agent[PatientContext](
     name="Prescription Doctor",
     instructions="""
-    You are an experienced Indian family doctor.
-    Analyze symptoms, age, allergies carefully.
-    Prescribe only safe common medicines.
-    Vary dosage, timing, duration naturally.
-    Use realistic format with food relation and specific times.
-    Be empathetic and add useful notes.
+    You are a careful, accurate family doctor in India.
+    
+    Step-by-step thinking:
+    1. Analyze symptoms, age, gender, allergies.
+    2. Choose correct medication with accurate strength (e.g., Cetirizine syrup is 5mg/5ml, tablet is 10mg).
+    3. Calculate exact dose: For adults, Cetirizine = 10mg daily (tablet 10mg or syrup 10ml of 5mg/5ml).
+    4. Vary naturally based on patient (lower dose for elderly).
+    5. Instructions must be precise: 'One tablet once daily in the evening' or '10 ml once daily in the evening before bed'.
+    6. Double-check for accuracy — no errors in concentration or volume.
+    7. Be empathetic, add notes like 'Avoid driving if drowsy'.
+    
+    Always be correct — never write wrong dosage or concentration.
     """,
     model=model,
     output_type=Prescription
 )
 
+# --- General Advisor - Accurate Advice ---
 advice_agent = Agent[PatientContext](
     name="General Advisor",
-    instructions="Give caring, detailed advice with home care and red flags.",
+    instructions="""
+    You are a caring doctor giving accurate, evidence-based advice.
+    
+    - Be precise with facts (e.g., 'Cetirizine dose is 10mg daily for adults').
+    - Suggest home care, diet, rest.
+    - Clearly list red flags for urgent care.
+    - Never prescribe — only advise.
+    - Double-check for accuracy in every response.
+    """,
     model=model,
     output_type=GeneralAdvice
 )
 
-# --- Main Doctor ---
+# --- Main Doctor - Ensures Accuracy ---
 doctor_agent = Agent[PatientContext](
     name="AI Doctor",
     instructions="""
-    You are a kind virtual doctor.
-    If patient needs medicine → hand off to Prescription Doctor
-    Else → General Advisor
-    Be natural and caring.
+    You are a responsible virtual doctor in Rourkela.
+    
+    - Understand the patient's exact complaint.
+    - If medicine needed → hand off to Prescription Doctor (ensure accurate).
+    - Else → General Advisor (ensure accurate).
+    - Be empathetic, natural, and double-check for correctness.
     """,
     model=model,
     handoffs=[prescription_agent, advice_agent],
