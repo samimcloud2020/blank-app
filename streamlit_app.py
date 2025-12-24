@@ -1,102 +1,81 @@
 # streamlit_app.py
 import asyncio
 import streamlit as st
-from main import UserContext, Runner, fitness_agent, InputGuardrailTripwireTriggered, WorkoutPlan, MealPlan
+from main import PatientContext, Runner, doctor_agent, InputGuardrailTripwireTriggered, Prescription, GeneralAdvice
 
-# ===================================
-# Page Setup - Modern & Colorful
-# ===================================
 st.set_page_config(
-    page_title="💪 AI Fitness Coach Pro",
-    page_icon="💪",
+    page_title="🩺 Virtual Doctor Consultation",
+    page_icon="🩺",
     layout="centered",
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS for bold, colorful sidebar
 st.markdown("""
 <style>
-    .css-1d391kg {padding-top: 1rem;}
+    .main {background-color: #f8f9fa;}
     .sidebar .sidebar-content {
-        background: linear-gradient(180deg, #1e1e2e, #2d1b69);
+        background: linear-gradient(180deg, #0f3b57, #1e5f87);
         color: white;
     }
-    .stSelectbox > div > div {background-color: #3b2a8a !important; color: white;}
-    .stTextInput > div > div > input {background-color: #4a3b9e; color: white;}
-    h1, h2, h3 {color: #ff6b6b;}
-    .stSuccess {background-color: #2ecc71; color: white;}
+    h1, h2, h3 {color: #0d6efd;}
+    .stSuccess {background-color: #d4edda; color: #155724;}
+    .stError {background-color: #f8d7da; color: #721c24;}
+    .stInfo {background-color: #d1ecf1; color: #0c5460;}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("💪 **Your Personal AI Fitness Coach**")
-st.markdown("### Safe • Personalized • Science-Backed Fitness Guidance")
+st.title("🩺 **Virtual Doctor Consultation**")
+st.markdown("### Safe • Ethical • AI-Powered Medical Guidance")
+st.caption("⚠️ This is not a substitute for real medical care. Always consult a licensed physician.")
 
-# ===================================
-# Sidebar - Colorful & Bold
-# ===================================
+# Sidebar - Patient Profile
 with st.sidebar:
     st.markdown("""
-    <div style='text-align: center; padding: 10px;'>
-        <h2 style='color:#ff6b6b; margin:0;'>👤 YOUR PROFILE</h2>
-        <p style='color:#a29bfe;'>Customize your plan</p>
+    <div style='text-align: center; padding: 20px; background:#0d6efd; border-radius:10px; color:white;'>
+        <h2>📋 Patient Profile</h2>
+        <p>Accurate info = better guidance</p>
     </div>
     """, unsafe_allow_html=True)
-
     st.markdown("---")
 
-    name = st.text_input("**Your Name**", placeholder="e.g., Alex", value="")
+    name = st.text_input("**Full Name**", value="Jane Smith")
+    age = st.number_input("**Age**", min_value=1, max_value=120, value=42)
+    gender = st.selectbox("**Gender**", ["female", "male", "other", "prefer not to say"])
 
-    st.markdown("#### 🎯 **Fitness Level**")
-    fitness_level = st.selectbox(
-        "Choose your level",
-        ["beginner", "intermediate", "advanced"],
-        help="Be honest — better results come from accurate starting point!"
-    )
+    st.markdown("#### 😷 **Current Symptoms**")
+    symptoms = st.multiselect("Select common symptoms", [
+        "fever", "cough", "sore throat", "headache", "fatigue", "nausea",
+        "shortness of breath", "chest pain", "rash", "joint pain"
+    ])
+    custom_symptom = st.text_input("Other symptoms")
+    if custom_symptom:
+        symptoms.append(custom_symptom)
 
-    st.markdown("#### 🏆 **Main Goal**")
-    fitness_goal = st.selectbox(
-        "What are you working toward?",
-        ["weight loss", "muscle gain", "general fitness", "strength", "endurance", "toning", "mobility/flexibility"]
-    )
+    st.markdown("#### 🩹 **Medical History**")
+    history = st.multiselect("Known conditions", [
+        "hypertension", "diabetes", "asthma", "migraines", "heart disease", "none"
+    ])
+    custom_history = st.text_input("Other conditions")
+    if custom_history:
+        history.append(custom_history)
 
-    st.markdown("#### 🍎 **Diet Preference**")
-    dietary_preference = st.selectbox(
-        "Any dietary needs?",
-        ["no restrictions", "vegetarian", "vegan", "pescatarian", "keto", "gluten-free"]
-    )
+    allergies = st.text_input("**Allergies** (e.g., penicillin, latex)", placeholder="none")
+    meds = st.text_input("**Current Medications**", placeholder="e.g., albuterol, ibuprofen")
 
-    st.markdown("#### 🏋️ **Equipment Available**")
-    cols = st.columns(2)
-    equipment = []
-    options = ["dumbbells", "resistance bands", "barbell", "pull-up bar", "bench", "kettlebell", "gym access"]
-    labels = ["Dumbbells", "Bands", "Barbell", "Pull-up Bar", "Bench", "Kettlebell", "Full Gym"]
-
-    for i, (opt, label) in enumerate(zip(options, labels)):
-        if cols[i % 2].checkbox(label, key=opt):
-            equipment.append(opt)
-    if not equipment:
-        equipment = ["none / bodyweight only"]
-
-    # Create context
-    user_context = UserContext(
-        user_id=name or "User",
-        fitness_level=fitness_level,
-        fitness_goal=fitness_goal,
-        dietary_preference=dietary_preference,
-        available_equipment=equipment
+    patient_context = PatientContext(
+        patient_id=name,
+        age=age,
+        gender=gender,
+        current_symptoms=symptoms,
+        medical_history=history,
+        allergies=[a.strip() for a in allergies.split(",") if a.strip()],
+        current_medications=[m.strip() for m in meds.split(",") if m.strip()]
     )
 
     st.markdown("---")
-    st.markdown(f"""
-    <div style='text-align:center; background:#ff6b6b; padding:10px; border-radius:10px;'>
-        <h3 style='color:white; margin:0;'>✅ READY TO TRAIN!</h3>
-        <p style='color:white; margin:5px;'><strong>{fitness_goal.title()}</strong> mode activated</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("<h3 style='text-align:center; color:white; background:#0d6efd; padding:10px; border-radius:10px;'>✅ Ready</h3>", unsafe_allow_html=True)
 
-# ===================================
-# Chat Interface
-# ===================================
+# Chat History
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -104,29 +83,32 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-if prompt := st.chat_input("💬 Ask me for a workout, meal plan, tips, or motivation..."):
+if prompt := st.chat_input("🩺 Describe your symptoms or ask a medical question..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("🤖 Crafting your personalized plan..."):
+        with st.spinner("🩺 Your doctor is reviewing your case..."):
             try:
-                result = asyncio.run(Runner.run(fitness_agent, prompt, context=user_context))
+                result = asyncio.run(Runner.run(doctor_agent, prompt, context=patient_context))
                 output = result.final_output
 
-                if isinstance(output, WorkoutPlan):
-                    st.success("💥 **Your Custom Workout Plan**")
-                    for ex in output.exercises:
-                        st.markdown(f"**• {ex}**")
-                    st.info(f"**📋 Coach's Notes:** {output.notes}")
+                if isinstance(output, Prescription):
+                    st.success("💊 **Prescription Issued**")
+                    st.markdown(f"**Medication:** {output.medication}")
+                    st.markdown(f"**Dosage:** {output.dosage}")
+                    st.markdown(f"**Duration:** {output.duration}")
+                    st.markdown(f"**Instructions:** {output.instructions}")
+                    st.markdown(f"**Refill:** {'Yes' if output.refill else 'No'}")
 
-                elif isinstance(output, MealPlan):
-                    st.success("🍱 **Your Custom Meal Plan**")
-                    st.markdown(f"**🔥 Daily Calories:** {output.daily_calories}")
-                    for meal in output.meal_suggestions:
-                        st.markdown(f"**🍴 {meal}**")
-                    st.info(f"**🥗 Nutrition Tips:** {output.notes}")
+                elif isinstance(output, GeneralAdvice):
+                    st.info("🩺 **Doctor's Recommendation**")
+                    st.markdown(output.advice)
+                    if "urgent" in output.follow_up.lower() or "emergency" in output.follow_up.lower():
+                        st.warning(f"**⚠️ Important:** {output.follow_up}")
+                    else:
+                        st.markdown(f"**Next Steps:** {output.follow_up}")
 
                 else:
                     st.markdown(output)
@@ -134,26 +116,17 @@ if prompt := st.chat_input("💬 Ask me for a workout, meal plan, tips, or motiv
                 st.session_state.messages.append({"role": "assistant", "content": str(output)})
 
             except InputGuardrailTripwireTriggered as e:
-                analysis = getattr(e, "guardrail_output", None)
-                reason = getattr(analysis, "reasoning", "This involves potentially unsafe methods.")
-
+                reason = "This request appears to involve controlled substances or unsafe practices."
                 st.error(f"""
-                🚨 **Safety Alert**
-
-                I'm here to help you reach your goals **safely**.
-
-                **⚠️ Issue Detected:** {reason}
-
-                I cannot assist with steroids, dangerous drugs, or extreme crash diets.
-
-                Let's build a **healthy, sustainable plan** that gets real results — safely and for the long term.
-
-                Try asking:  
-                • "Give me a beginner workout plan"  
-                • "Safe meal plan for weight loss"  
-                • "How can I build muscle naturally?"
+                ⚠️ **Unable to Proceed**
+                
+                {reason}
+                
+                I cannot assist with requests for controlled medications or potentially harmful treatments.
+                Please see a doctor in person for evaluation.
                 """)
-                st.session_state.messages.append({"role": "assistant", "content": "Safety guardrail triggered: Dangerous request blocked."})
+                st.session_state.messages.append({"role": "assistant", "content": "Input blocked by safety guardrail."})
 
             except Exception as e:
-                st.error("😕 Something went wrong. Please try again!")
+                st.error("😞 A system error occurred. Please try again later.")
+                st.session_state.messages.append({"role": "assistant", "content": "Error occurred."})
