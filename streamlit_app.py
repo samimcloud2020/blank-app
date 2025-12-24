@@ -1,11 +1,10 @@
 # streamlit_app.py
 import streamlit as st
 import nest_asyncio
-import asyncio  # ← THIS WAS MISSING — NOW ADDED
+import asyncio
 from datetime import date
 from main import PatientContext, Runner, doctor_agent, InputGuardrailTripwireTriggered, Prescription, GeneralAdvice
 
-# Apply nest_asyncio to allow asyncio.run() in Streamlit
 nest_asyncio.apply()
 
 st.set_page_config(page_title="🩺 AI Doctor - Rourkela", page_icon="🩺", layout="centered")
@@ -87,7 +86,6 @@ if prompt := st.chat_input("🩺 Describe symptoms or ask for medicine..."):
     with st.chat_message("assistant"):
         with st.spinner("🩺 Consulting..."):
             try:
-                # Now works — asyncio is imported and nest_asyncio applied
                 result = asyncio.run(Runner.run(doctor_agent, prompt, context=patient_context))
                 output = result.final_output
                 today = date.today().strftime("%d %B %Y")
@@ -146,4 +144,3 @@ if prompt := st.chat_input("🩺 Describe symptoms or ask for medicine..."):
 
             except Exception as e:
                 st.error(f"Error: {str(e)}")
-                st.session_state.messages.append({"role": "assistant", "content": "Sorry, an error occurred."})
