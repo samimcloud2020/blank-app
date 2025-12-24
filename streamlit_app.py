@@ -9,14 +9,14 @@ nest_asyncio.apply()
 
 st.set_page_config(page_title="🩺 AI Doctor - Rourkela", page_icon="🩺", layout="centered")
 
-# Design
+# === STUNNING DESIGN ===
 st.markdown("""
 <style>
-    .big-title {font-size: 80px !important; font-weight: 900; background: linear-gradient(90deg, #ff1744, #00bcd4, #4caf50); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-align: center;}
+    .big-title {font-size: 80px !important; font-weight: 900; background: linear-gradient(90deg, #ff1744, #00bcd4, #4caf50); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-align: center; margin: 20px 0;}
     .header-box {background: linear-gradient(135deg, #1e3a8a, #3b82f6); padding: 35px; border-radius: 30px; color: white; text-align: center; box-shadow: 0 15px 40px rgba(59,130,246,0.4);}
-    .rx-big {font-size: 120px !important; font-weight: 900; color: #dc2626; text-align: center; margin: 40px 0; text-shadow: 8px 8px 20px rgba(220,38,38,0.4); letter-spacing: 15px;}
-    .rx-box {background: linear-gradient(to bottom, #f8fff8, #f0fdf4); border: 10px solid #16a34a; border-radius: 40px; padding: 60px; box-shadow: 0 30px 70px rgba(22,163,74,0.3);}
-    .med-item {background: linear-gradient(to right, #f0fdfa, #ccfbf1); padding: 35px; border-radius: 30px; margin: 30px 0; border-left: 15px solid #14b8a6; box-shadow: 0 12px 35px rgba(20,184,166,0.2);}
+    .rx-big {font-size: 130px !important; font-weight: 900; color: #dc2626; text-align: center; margin: 50px 0 40px 0; text-shadow: 10px 10px 25px rgba(220,38,38,0.4); letter-spacing: 20px;}
+    .rx-box {background: linear-gradient(to bottom, #f8fff8, #f0fdf4); border: 12px solid #16a34a; border-radius: 45px; padding: 60px; box-shadow: 0 30px 80px rgba(22,163,74,0.35);}
+    .med-item {background: linear-gradient(to right, #f0fdfa, #ccfbf1); padding: 40px; border-radius: 35px; margin: 35px 0; border-left: 18px solid #14b8a6; box-shadow: 0 15px 40px rgba(20,184,166,0.25);}
     .patient-card {background: linear-gradient(to bottom, #dbeafe, #bfdbfe); border-left: 15px solid #2563eb; padding: 40px; border-radius: 30px; box-shadow: 0 15px 40px rgba(37,99,235,0.25);}
     .sidebar-title {background: linear-gradient(90deg, #d946ef, #f72585); padding: 30px; border-radius: 30px; text-align: center; color: white; font-size: 34px; font-weight: bold;}
     .sidebar-label {font-weight: bold; color: #fbbf24; font-size: 22px; background: #1e1b4b; padding: 15px; border-radius: 20px; text-align: center; margin: 25px 0 10px 0;}
@@ -34,7 +34,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Session
+# Session state
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "current_prescription" not in st.session_state:
@@ -74,7 +74,7 @@ with st.sidebar:
         current_medications=[m.strip() for m in current_meds.split(",") if m.strip()]
     )
 
-# Main Layout
+# Main Layout - Patient Card + Prescription Box
 col1, col2 = st.columns([1.4, 2.6])
 today = date.today().strftime("%d %B %Y")
 
@@ -143,7 +143,7 @@ if prompt := st.chat_input("🩺 Tell me your symptoms or ask for treatment...")
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("🩺 Preparing your personalized prescription..."):
+        with st.spinner("🩺 AI Doctor is analyzing and preparing your prescription..."):
             try:
                 result = asyncio.run(Runner.run(doctor_agent, prompt, context=patient_context))
                 output = result.final_output
@@ -151,6 +151,8 @@ if prompt := st.chat_input("🩺 Tell me your symptoms or ask for treatment...")
                 if isinstance(output, Prescription):
                     st.session_state.current_prescription = output
                     st.success("✅ **Your Personalized Prescription is Ready!**")
+                    st.markdown("**See your prescription above in the green box ↑**")
+                    st.rerun()  # ← Forces immediate refresh to show prescription
 
                 elif isinstance(output, GeneralAdvice):
                     st.info("🩺 **Doctor's Advice**")
