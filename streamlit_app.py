@@ -1,124 +1,157 @@
 # streamlit_app.py
 import asyncio
 import streamlit as st
+from datetime import date
 from main import PatientContext, Runner, doctor_agent, InputGuardrailTripwireTriggered, Prescription, GeneralAdvice
 
-# Page Config
-st.set_page_config(
-    page_title="🩺 Virtual Doctor - AI Consultation",
-    page_icon="🩺",
-    layout="centered",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="🩺 AI Doctor - Rourkela", page_icon="🩺", layout="centered")
 
-# Styling
+# === GORGEOUS COLORFUL DESIGN ===
 st.markdown("""
 <style>
-    .main {background-color: #f8f9fa;}
+    .big-title {font-size: 60px !important; font-weight: bold; background: linear-gradient(90deg, #ff6b6b, #4ecdc4); -webkit-background-clip: text; -webkit-text-fill-color: transparent;}
+    .header-box {background: linear-gradient(135deg, #667eea, #764ba2); padding: 20px; border-radius: 15px; color: white; text-align: center;}
+    .rx-header {font-size: 50px; font-weight: bold; color: #d32f2f; text-align: center; margin: 20px 0;}
+    .rx-box {background: #f8fff8; border: 3px solid #4caf50; border-radius: 20px; padding: 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.1);}
+    .patient-card {background: #e3f2fd; border-left: 8px solid #2196f3; padding: 20px; border-radius: 10px;}
     .sidebar .sidebar-content {background: linear-gradient(180deg, #0d47a1, #1976d2); color: white;}
-    h1, h2, h3 {color: #0d47a1;}
-    .stSuccess {background-color: #e8f5e8; color: #2e7d32;}
-    .stError {background-color: #ffebee; color: #c62828;}
-    .stInfo {background-color: #e3f2fd; color: #1565c0;}
+    h1, h2, h3 {color: #1e3d59;}
+    .stButton>button {background: #ff5252; color: white; font-weight: bold; border-radius: 10px;}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🩺 **Virtual Doctor Consultation**")
-st.markdown("### Safe • Responsible • AI-Powered Medical Guidance")
-st.caption("⚠️ This is not a substitute for real medical care. For emergencies, call your local emergency services.")
+# Header
+st.markdown("<div class='big-title'>🩺 AI DOCTOR</div>", unsafe_allow_html=True)
+st.markdown("""
+<div class='header-box'>
+    <h2>Virtual Clinic • Rourkela, Odisha</h2>
+    <p>Your Trusted AI Physician | Safe • Fast • Caring</p>
+</div>
+""", unsafe_allow_html=True)
 
-# Sidebar - Patient Profile Input
+# Sidebar - Beautiful Patient Form
 with st.sidebar:
-    st.markdown("<h2 style='color:white;'>📋 Patient Information</h2>", unsafe_allow_html=True)
-    st.markdown("---")
+    st.markdown("""
+    <div style='text-align:center; padding:20px; background:#1976d2; border-radius:15px;'>
+        <h2 style='color:white;'>👤 Patient Details</h2>
+        <p style='color:#bbdefb;'>Please fill accurately</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    name = st.text_input("**Full Name**", value="Alex Rivera")
-    age = st.number_input("**Age**", min_value=1, max_value=120, value=30)
-    gender = st.selectbox("**Gender**", ["male", "female", "other", "prefer not to say"])
+    name = st.text_input("**Full Name**", value="Rahul Sharma", placeholder="Enter your name")
+    age = st.number_input("**Age**", min_value=1, max_value=120, value=32)
+    gender = st.selectbox("**Gender**", ["Male", "Female", "Other"])
 
-    st.markdown("#### 😷 **Current Symptoms**")
-    symptoms = st.multiselect(
-        "Select or add your symptoms",
-        ["fever", "headache", "sore throat", "cough", "runny nose", "heartburn", "allergy symptoms",
-         "nausea", "rash", "joint pain", "fatigue", "shortness of breath"]
-    )
-    custom_symptom = st.text_input("Other symptom")
-    if custom_symptom:
-        symptoms.append(custom_symptom)
+    st.markdown("#### 😷 Today's Symptoms")
+    symptoms = st.multiselect("Select your symptoms", [
+        "Fever", "Headache", "Cold & Cough", "Sore Throat", "Body Pain", "Acidity",
+        "Allergy", "Stomach Upset", "Loose Motion", "Vomiting"
+    ])
+    other = st.text_input("Other symptoms?")
+    if other:
+        symptoms.append(other)
 
-    st.markdown("#### 🩹 **Medical History**")
-    history = st.multiselect("Known conditions", ["hypertension", "diabetes", "asthma", "migraines", "none"])
-    other_history = st.text_input("Other conditions")
-    if other_history:
-        history.append(other_history)
+    allergies = st.text_input("**Allergies** (if any)", placeholder="e.g., penicillin")
+    current_meds = st.text_input("**Current Medicines**", placeholder="e.g., none")
 
-    allergies = st.text_input("**Allergies** (e.g., penicillin, nuts)", placeholder="none")
-    current_meds = st.text_input("**Current Medications**", placeholder="e.g., ibuprofen, metformin")
-
-    # Build Patient Context from Web Input
     patient_context = PatientContext(
         patient_id=name or "Patient",
         age=age,
         gender=gender,
         current_symptoms=symptoms,
-        medical_history=history,
+        medical_history=[],
         allergies=[a.strip() for a in allergies.split(",") if a.strip()],
         current_medications=[m.strip() for m in current_meds.split(",") if m.strip()]
     )
 
     st.markdown("---")
-    st.markdown("<h3 style='text-align:center; color:white; background:#0d47a1; padding:10px; border-radius:10px;'>✅ Ready for Consultation</h3>", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div style='text-align:center; background:#ff5252; padding:15px; border-radius:12px; color:white;'>
+        <h3>✅ Consultation Ready</h3>
+        <p><strong>{name}</strong> • {age} years</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-# Chat Interface
+# Chat
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+        st.markdown(msg["content"], unsafe_allow_html=True)
 
-if prompt := st.chat_input("🩺 Tell me your symptoms or ask a medical question..."):
+if prompt := st.chat_input("🩺 Tell me how you're feeling or ask for medicine..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("🩺 Your doctor is reviewing your case..."):
+        with st.spinner("🩺 AI Doctor is writing your prescription..."):
             try:
                 result = asyncio.run(Runner.run(doctor_agent, prompt, context=patient_context))
                 output = result.final_output
+                today = date.today().strftime("%d %B %Y")
 
                 if isinstance(output, Prescription):
-                    st.success("💊 **Prescription Issued**")
-                    st.markdown(f"**Medication:** {output.medication}")
-                    st.markdown(f"**Dosage:** {output.dosage}")
-                    st.markdown(f"**Duration:** {output.duration}")
-                    st.markdown(f"**Quantity:** {output.quantity}")
-                    st.markdown(f"**Instructions:** {output.instructions}")
-                    if output.notes:
-                        st.info(f"**Note from Doctor:** {output.notes}")
-                    st.markdown(f"**Refill Allowed:** {'Yes' if output.refill else 'No'}")
-                    st.warning("Take this prescription to your pharmacy.")
+                    st.success("✅ **Prescription Ready**")
+
+                    # Two columns: Left = Patient Info, Right = Prescription
+                    col1, col2 = st.columns([1.2, 2.5])
+
+                    with col1:
+                        st.markdown(f"""
+                        <div class='patient-card'>
+                            <h3 style='color:#1976d2;'>Patient</h3>
+                            <p>
+                            <strong>{patient_context.patient_id}</strong><br>
+                            Age: {patient_context.age} • {patient_context.gender}<br>
+                            Date: <strong>{today}</strong><br><br>
+                            <strong>Symptoms:</strong><br>
+                            {', '.join(patient_context.current_symptoms) or 'General consultation'}
+                            </p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    with col2:
+                        st.markdown("<div class='rx-box'>", unsafe_allow_html=True)
+
+                        # Doctor Header
+                        st.markdown("""
+                        <div style='text-align:center; margin-bottom:20px;'>
+                            <h2 style='color:#d32f2f; font-weight:bold;'>AI DOCTOR</h2>
+                            <h4>Virtual Clinic<br>Rourkela, Odisha, India</h4>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                        # Big Bold Rx
+                        st.markdown("<div class='rx-header'>Rx</div>", unsafe_allow_html=True)
+
+                        # Medications
+                        for i in range(len(output.medications)):
+                            st.markdown(f"**{i+1}. {output.medications[i]}**")
+                            st.markdown(f"<strong>↳ Take:</strong> {output.sig[i]}", unsafe_allow_html=True)
+                            st.markdown(f"<strong>↳ Dispense:</strong> {output.quantity[i]}", unsafe_allow_html=True)
+                            st.markdown("<br>", unsafe_allow_html=True)
+
+                        st.markdown(f"**Duration:** {output.duration}")
+                        st.markdown(f"**Refills:** {output.refills}")
+
+                        if output.additional_notes:
+                            st.info(f"**Important Note:** {output.additional_notes}")
+
+                        st.markdown("</div>", unsafe_allow_html=True)
+
+                    st.warning("💊 Take this prescription to your pharmacy. Follow timing exactly. Contact doctor if no improvement in 3 days.")
 
                 elif isinstance(output, GeneralAdvice):
-                    st.info("🩺 **Doctor's Recommendation**")
+                    st.info("🩺 **Doctor's Advice**")
                     st.markdown(output.advice)
-                    st.markdown(f"**Follow-up:** {output.follow_up}")
-
-                else:
-                    st.markdown(output)
+                    st.markdown(f"**Follow-up:** {output.follow_up")
 
                 st.session_state.messages.append({"role": "assistant", "content": str(output)})
 
             except InputGuardrailTripwireTriggered:
-                st.error("""
-                ⚠️ **Cannot Proceed with Request**
-                
-                This involves a controlled or restricted medication.
-                I can only prescribe safe, common medications for routine conditions.
-                
-                Please see a doctor in person.
-                """)
+                st.error("⚠️ Cannot prescribe this medicine. It is restricted or unsafe. Please visit a doctor in person.")
 
-            except Exception as e:
-                st.error("😞 A system error occurred. Please try again.")
+            except Exception:
+                st.error("System error. Try again.")
