@@ -72,7 +72,7 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-# Chat
+# Chat History
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -80,6 +80,7 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"], unsafe_allow_html=True)
 
+# User Input
 if prompt := st.chat_input("🩺 Tell me how you're feeling or ask for medicine..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -119,14 +120,14 @@ if prompt := st.chat_input("🩺 Tell me how you're feeling or ask for medicine.
                         st.markdown("""
                         <div style='text-align:center; margin-bottom:20px;'>
                             <h2 style='color:#d32f2f; font-weight:bold;'>AI DOCTOR</h2>
-                            <h4>Virtual Clinic<br>Rourkela, Odisha, India</h4>
+                            <h4>Virtual Clinic<br><strong>Rourkela, Odisha, India</strong></h4>
                         </div>
                         """, unsafe_allow_html=True)
 
                         # Big Bold Rx
                         st.markdown("<div class='rx-header'>Rx</div>", unsafe_allow_html=True)
 
-                        # Medications
+                        # Medications with full instructions
                         for i in range(len(output.medications)):
                             st.markdown(f"**{i+1}. {output.medications[i]}**")
                             st.markdown(f"<strong>↳ Take:</strong> {output.sig[i]}", unsafe_allow_html=True)
@@ -146,12 +147,23 @@ if prompt := st.chat_input("🩺 Tell me how you're feeling or ask for medicine.
                 elif isinstance(output, GeneralAdvice):
                     st.info("🩺 **Doctor's Advice**")
                     st.markdown(output.advice)
-                    st.markdown(f"**Follow-up:** {output.follow_up")
+                    st.markdown(f"**Follow-up:** {output.follow_up}")  # ← FIXED LINE
 
+                # Save response to chat history
                 st.session_state.messages.append({"role": "assistant", "content": str(output)})
 
             except InputGuardrailTripwireTriggered:
-                st.error("⚠️ Cannot prescribe this medicine. It is restricted or unsafe. Please visit a doctor in person.")
+                error_msg = """
+                ⚠️ **Cannot Issue This Prescription**
+                
+                This medicine is restricted or unsafe without physical examination.
+                For your safety, I can only prescribe common, non-controlled medications.
+                
+                Please visit a doctor in person.
+                """
+                st.error(error_msg)
+                st.session_state.messages.append({"role": "assistant", "content": error_msg})
 
-            except Exception:
-                st.error("System error. Try again.")
+            except Exception as e:
+                st.error("😞 System error occurred. Please try again.")
+                st.session_state.messages.append({"role": "assistant", "content": "Error occurred."})
