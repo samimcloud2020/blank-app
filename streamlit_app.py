@@ -1,264 +1,125 @@
-# app.py - Secure PDF Intelligence Assistant (Instant Query Display + PDF Priority)
+# streamlit_app.py
+import asyncio
 import os
 import streamlit as st
-from openai import OpenAI
-from agents import Agent, Runner, FileSearchTool, WebSearchTool
-from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+from typing import List
 
-# ----------------------------- Load Secrets Safely -----------------------------
-load_dotenv(override=False)
+# ───────────────────────────────────────────────
+#   Assuming your agent-related classes are in a separate file
+#   (you can also keep them here if you prefer one-file solution)
+# ───────────────────────────────────────────────
 
-if "OPENAI_API_KEY" not in st.secrets:
-    st.error("❌ OPENAI_API_KEY not found in Streamlit Secrets!")
-    st.stop()
-
-OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
-
-if "PASSWORD" not in st.secrets:
-    st.error("❌ PASSWORD not found in Streamlit Secrets!")
-    st.stop()
-
-PASSWORD = st.secrets["PASSWORD"]
-
-MODEL_NAME = st.secrets.get("MODEL_NAME", "gpt-4o")
-
-# ----------------------------- Stylish Yellow & Gold Theme -----------------------------
-st.set_page_config(page_title="Secure PDF Intelligence Assistant", layout="wide")
-
-st.markdown("""
-<style>
-    .main {
-        background: linear-gradient(135deg, #FFD700 0%, #FFA500 30%, #FF8C00 70%, #FF6347 100%);
-        background-attachment: fixed;
-        color: #1a1a1a;
-        padding: 2rem;
-    }
-    [data-testid="stSidebar"] {
-        background: linear-gradient(to bottom, #FFB300, #FF8F00);
-        padding-top: 1rem;
-        border-right: 4px solid #FFD700;
-        box-shadow: 5px 0 15px rgba(0,0,0,0.2);
-    }
-    h1 {
-        color: #8B4513 !important;
-        font-size: 3.8rem !important;
-        font-weight: 900 !important;
-        text-align: center;
-        text-shadow: 0 4px 8px rgba(0,0,0,0.3);
-        margin-bottom: 1rem;
-        font-family: 'Georgia', serif;
-    }
-    .big-bold {
-        font-size: 2rem !important;
-        font-weight: bold !important;
-        color: #8B4513 !important;
-        text-align: center;
-        margin: 2rem 0;
-        text-shadow: 0 2px 4px rgba(0,0,0,0.2);
-    }
-    .status-box {
-        padding: 2.5rem;
-        border-radius: 25px;
-        background: rgba(255, 255, 255, 0.85);
-        backdrop-filter: blur(12px);
-        margin: 2rem auto;
-        max-width: 900px;
-        text-align: center;
-        font-size: 1.5rem;
-        font-weight: bold;
-        color: #8B4513;
-        border: 4px solid #FFD700;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-    }
-    .stChatInput > div > div > input {
-        background: white !important;
-        color: #333 !important;
-        border-radius: 35px !important;
-        font-size: 1.4rem !important;
-        padding: 1.4rem 2rem !important;
-        box-shadow: 0 8px 25px rgba(0,0,0,0.3);
-        border: 3px solid #FFD700;
-    }
-    .stChatMessage {
-        background: rgba(255, 255, 255, 0.9);
-        border-radius: 20px;
-        padding: 1.2rem;
-        margin: 1rem 0;
-        backdrop-filter: blur(8px);
-        border: 1px solid #FFD700;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-    }
-    .footer {
-        text-align: center;
-        color: #8B4513;
-        margin-top: 8rem;
-        font-size: 1.2rem;
-        font-weight: bold;
-        text-shadow: 0 2px 5px rgba(0,0,0,0.2);
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# ----------------------------- OpenAI Client -----------------------------
-client = OpenAI(api_key=OPENAI_API_KEY)
-
-# ----------------------------- Sidebar: Login & Upload -----------------------------
-with st.sidebar:
-    st.markdown("### 🔐 **Access Control**")
-
-    if "authenticated" not in st.session_state:
-        st.session_state.authenticated = False
-
-    if not st.session_state.authenticated:
-        st.markdown("**Enter your access password**")
-        password_input = st.text_input("Password", type="password", label_visibility="collapsed")
-        if st.button("🔓 Login"):
-            if password_input == PASSWORD:
-                st.session_state.authenticated = True
-                st.success("✅ Access granted!")
-                st.rerun()
-            else:
-                st.error("❌ Incorrect password")
-        st.stop()
-
-    st.success("✅ **Authenticated**")
-    st.markdown("---")
-    st.markdown("### 📤 **Upload PDF Documents**")
-    st.markdown("**Drag & drop your PDFs below (optional)**")
-
-    uploaded_files = st.file_uploader(
-        "Upload PDFs",
-        type=["pdf"],
-        accept_multiple_files=True,
-        label_visibility="collapsed"
+# We'll import your existing modules — adjust paths/names as needed
+try:
+    from main import (
+        UserContext,
+        fitness_agent,
+        Runner,
+        InputGuardrailTripwireTriggered,
+        WorkoutPlan,
+        MealPlan,
+        # goal_analysis_agent, fitness_goal_guardrail, etc. if needed
     )
+except ImportError:
+    st.error("Could not import from main.py — please check file structure")
+    st.stop()
 
-    if uploaded_files:
-        st.markdown("### 🔄 Processing your PDFs... Please wait")
-
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-
-        total = len(uploaded_files)
-        file_ids = []
-
-        for i, file in enumerate(uploaded_files):
-            status_text.text(f"Uploading: {file.name} ({i+1}/{total})")
-            temp_path = f"/tmp/{file.name}"
-            with open(temp_path, "wb") as f:
-                f.write(file.getbuffer())
-            uploaded = client.files.create(file=open(temp_path, "rb"), purpose="assistants")
-            file_ids.append(uploaded.id)
-            os.remove(temp_path)
-            progress_bar.progress((i + 1) / total * 0.7)
-
-        status_text.text("Setting up knowledge base...")
-        stores = client.vector_stores.list(limit=20)
-        vector_store = next((vs for vs in stores.data if vs.name == "Secure_PDF_RAG_Store"), None)
-        if not vector_store:
-            vector_store = client.vector_stores.create(name="Secure_PDF_RAG_Store")
-
-        status_text.text("Indexing documents... Final step!")
-        client.vector_stores.file_batches.create_and_poll(
-            vector_store_id=vector_store.id,
-            file_ids=file_ids
-        )
-
-        progress_bar.progress(1.0)
-        status_text.empty()
-
-        st.session_state.vector_store = vector_store
-        st.session_state.pdfs_ready = True
-
-        st.success(f"✅ {total} PDF(s) fully processed!")
-        st.balloons()
-
-# ----------------------------- Main Area -----------------------------
-st.markdown("<h1>📄 Secure PDF Intelligence Assistant</h1>", unsafe_allow_html=True)
-st.markdown("<div class='big-bold'>Ask anything — your question appears instantly</div>", unsafe_allow_html=True)
-
-# Status message
-if "pdfs_ready" not in st.session_state or not st.session_state.pdfs_ready:
-    st.markdown("""
-        <div class='status-box'>
-            <h3>🌐 Web search ready</h3>
-            <p>Type your question — it will appear immediately!</p>
-        </div>
-    """, unsafe_allow_html=True)
-else:
-    st.markdown("""
-        <div class='status-box'>
-            <h2>✅ PDFs loaded</h2>
-            <p><strong>Your question appears instantly — I search PDFs first, then web if needed</strong></p>
-        </div>
-    """, unsafe_allow_html=True)
-
-# ----------------------------- Tools & Agent (PDF Priority) -----------------------------
-tools = [WebSearchTool()]
-
-if st.session_state.get("pdfs_ready") and "vector_store" in st.session_state:
-    file_search_tool = FileSearchTool(vector_store_ids=[st.session_state.vector_store.id])
-    tools = [file_search_tool, WebSearchTool()]  # PDF first
-
-agent = Agent(
-    name="PDF-First Intelligence Expert",
-    instructions="""
-You are a highly intelligent assistant with strict priority:
-
-1. TOP PRIORITY: Always search the uploaded PDF documents FIRST using file search.
-   - If the question is about any content in the PDFs → use file search and quote from it.
-   - PDF information is the most trusted source.
-
-2. FALLBACK: Use web search ONLY if:
-   - The information is not in the PDFs
-   - The question is about current or future years (2025+), recent events, or general knowledge
-
-3. Use both if comparing PDF data with current info.
-
-Rules:
-- Be accurate and professional.
-- If PDF has the info → use it and mention "According to the uploaded document..."
-- If not in PDF → use web search and cite source.
-- If not found → say: "I could not find that information in the documents or on the web."
-""",
-    model=MODEL_NAME,
-    tools = [file_search_tool, WebSearchTool()],
+# ───────────────────────────────────────────────
+#   Page config
+# ───────────────────────────────────────────────
+st.set_page_config(
+    page_title="Fitness Coach Agent",
+    page_icon="🏋️",
+    layout="wide"
 )
 
-# ----------------------------- Chat History -----------------------------
+st.title("🏋️ Fitness Coach Agent Demo")
+st.markdown("Ask anything about workouts, nutrition, or general fitness!")
+
+# ───────────────────────────────────────────────
+#   Sidebar — User Profile
+# ───────────────────────────────────────────────
+with st.sidebar:
+    st.header("Your Profile")
+    
+    user_id = st.text_input("User ID", value="user123")
+    fitness_level = st.selectbox("Fitness Level", ["beginner", "intermediate", "advanced"], index=0)
+    fitness_goal = st.selectbox("Main Goal", ["weight loss", "muscle gain", "general fitness", "strength", "endurance"])
+    dietary_preference = st.selectbox("Dietary Preference", ["no restrictions", "vegetarian", "vegan", "keto"])
+    
+    st.subheader("Available Equipment")
+    equipment_options = ["dumbbells", "resistance bands", "barbell", "pull-up bar", "bench", "none / bodyweight only"]
+    available_equipment = st.multiselect("Select equipment you have", equipment_options, default=["dumbbells", "resistance bands"])
+    
+    user_context = UserContext(
+        user_id=user_id,
+        fitness_level=fitness_level,
+        fitness_goal=fitness_goal,
+        dietary_preference=dietary_preference,
+        available_equipment=available_equipment
+    )
+
+# ───────────────────────────────────────────────
+#   Chat interface
+# ───────────────────────────────────────────────
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display all messages
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(f"**{msg['content']}**")
+for message in st.session_state.messages:
+    role = "user" if message["role"] == "user" else "assistant"
+    avatar = "👤" if role == "user" else "🏋️"
+    with st.chat_message(role, avatar=avatar):
+        st.markdown(message["content"])
 
-# ----------------------------- User Input — Instant Display -----------------------------
-if prompt := st.chat_input("🔍 Type your question here — it appears instantly!"):
-    # 1. Add and show user message immediately
+# Chat input
+if prompt := st.chat_input("Ask me anything about fitness..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(f"**{prompt}**")
-
-    # Force rerun to show user message right away
-    st.rerun()
-
-# ----------------------------- AI Response (after rerun) -----------------------------
-# Check if last message is from user and no assistant response yet
-if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
-    prompt = st.session_state.messages[-1]["content"]
-
-    with st.chat_message("assistant"):
-        with st.spinner("🔍 Searching your documents first, then web if needed..."):
-            result = Runner.run_sync(agent, prompt)
-            response = result.final_output
-
-            st.markdown(f"**{response}**")
-            st.session_state.messages.append({"role": "assistant", "content": response})
-
-    # Final rerun to clean up spinner
-    st.rerun()
-
-# ----------------------------- Footer -----------------------------
-st.markdown("<div class='footer'>🔒 Secure • Instant • PDF Priority + Web Fallback • Powered by OpenAI</div>", unsafe_allow_html=True)
+    
+    with st.chat_message("user", avatar="👤"):
+        st.markdown(prompt)
+    
+    with st.chat_message("assistant", avatar="🏋️"):
+        with st.spinner("Thinking..."):
+            try:
+                # Run the agent asynchronously
+                result = asyncio.run(
+                    Runner.run(fitness_agent, prompt, context=user_context)
+                )
+                
+                final_output = result.final_output
+                
+                if isinstance(final_output, WorkoutPlan):
+                    st.markdown("**🧘‍♂️ Workout Plan**")
+                    st.write("**Exercises:**")
+                    for ex in final_output.exercises:
+                        st.markdown(f"- {ex}")
+                    st.markdown(f"**Notes:** {final_output.notes}")
+                
+                elif isinstance(final_output, MealPlan):
+                    st.markdown("**🍽️ Nutrition Plan**")
+                    st.markdown(f"**Daily calories:** {final_output.daily_calories}")
+                    st.write("**Meal suggestions:**")
+                    for meal in final_output.meal_suggestions:
+                        st.markdown(f"- {meal}")
+                    st.markdown(f"**Notes:** {final_output.notes}")
+                
+                else:
+                    # Generic response
+                    st.markdown(final_output)
+                
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": str(final_output)
+                })
+                
+            except InputGuardrailTripwireTriggered as e:
+                reason = getattr(e.guardrail_output, 'reasoning', "Unrealistic or unsafe goal detected.")
+                msg = f"⚠️ **Safety guardrail triggered**\n\n{reason}"
+                st.error(msg)
+                st.session_state.messages.append({"role": "assistant", "content": msg})
+                
+            except Exception as e:
+                error_msg = f"Error: {str(e)}"
+                st.error(error_msg)
+                st.session_state.messages.append({"role": "assistant", "content": error_msg})
