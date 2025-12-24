@@ -12,8 +12,8 @@ model = os.getenv('LLM_MODEL_NAME', 'gpt-4o-mini')
 
 # --- Models ---
 class Prescription(BaseModel):
-    medications: List[str] = Field(description="e.g., 'Tab. Cetirizine 10mg'")
-    sig: List[str] = Field(description="Accurate instructions")
+    medications: List[str]
+    sig: List[str]
     duration: str
     quantity: List[str]
     refills: str = "No refills"
@@ -41,96 +41,80 @@ class PatientContext:
 # --- Safety Reviewer ---
 safety_reviewer_agent = Agent(
     name="Safety Reviewer",
-    instructions="""
-    You are a strict medical safety and accuracy expert.
-    Check dosage, concentration, allergies, interactions.
-    Approve only safe, correct prescriptions.
-    Block any inaccuracy or unsafe advice.
-    """,
+    instructions="Strictly check dosage, concentration, allergies. Block unsafe or wrong prescriptions.",
     output_type=SafetyAnalysis,
     model=model
 )
 
-# --- INPUT GUARDRAIL ---
 async def input_guardrail(ctx: PatientContext, agent, input_data: str):
     try:
-        prompt = f"Patient message: '{input_data}'. Allergies: {ctx.allergies}. Safe to proceed?"
+        prompt = f"Patient: {ctx.patient_id}, Age: {ctx.age}, Symptoms: {ctx.current_symptoms}, Allergies: {ctx.allergies}. Message: '{input_data}'. Safe to proceed?"
         result = await Runner.run(safety_reviewer_agent, prompt)
         analysis = result.final_output_as(SafetyAnalysis)
         return GuardrailFunctionOutput(output_info=analysis, tripwire_triggered=not analysis.is_safe)
-    except Exception as e:
-        print(f"Input guardrail error: {e}")
+    except:
         return GuardrailFunctionOutput(output_info=SafetyAnalysis(is_safe=True, reasoning="Error"), tripwire_triggered=False)
 
-# --- OUTPUT GUARDRAIL - MUST HAVE EXACTLY THESE 4 PARAMETERS ---
 async def output_guardrail(ctx: PatientContext, agent, input_data: str, output_data):
     try:
-        prompt = f"""
-        Review this response for safety and accuracy:
-        {str(output_data)}
-        
-        Patient allergies: {ctx.allergies}
-        Current meds: {ctx.current_medications}
-        
-        Is dosage, concentration, and advice 100% correct and safe?
-        """
+        prompt = f"Review: {str(output_data)}\nPatient: {ctx.patient_id}, Allergies: {ctx.allergies}, Current meds: {ctx.current_medications}. Is it safe and accurate?"
         result = await Runner.run(safety_reviewer_agent, prompt)
         analysis = result.final_output_as(SafetyAnalysis)
         if not analysis.is_safe:
-            safe = GeneralAdvice(
-                advice="I cannot provide this prescription as it may be inaccurate or unsafe without in-person evaluation.",
-                follow_up="Please consult a licensed doctor."
-            )
+            safe = GeneralAdvice(advice="Cannot prescribe — unsafe or inaccurate.", follow_up="See doctor.")
             return GuardrailFunctionOutput(output_info=safe, tripwire_triggered=True, override_output=safe)
         return GuardrailFunctionOutput(output_info=analysis, tripwire_triggered=False)
-    except Exception as e:
-        print(f"Output guardrail error: {e}")
-        fallback = GeneralAdvice(advice="Safety review error.", follow_up="See a doctor.")
+    except:
+        fallback = GeneralAdvice(advice="Safety error.", follow_up="See doctor.")
         return GuardrailFunctionOutput(output_info=fallback, tripwire_triggered=True, override_output=fallback)
 
-# --- Prescription Agent ---
+# --- Prescription Doctor - Personalized & Varied ---
 prescription_agent = Agent[PatientContext](
     name="Prescription Doctor",
     instructions="""
-    You are an experienced Indian family doctor.
-    
-    Think step-by-step:
-    1. Check age, symptoms, allergies
-    2. Choose correct medicine and form (prefer tablet for adults)
-    3. Calculate exact dose accurately
-    4. Write clear instructions with timing and food relation.
-    5. Give medicine for all symptoms.
-    6. Advice patients also.
-    
-    Be natural, vary responses, but always accurate.
+    You are a caring family doctor in Rourkela.
+
+    Patient details:
+    Name: {ctx.patient_id}
+    Age: {ctx.age}
+    Gender: {ctx.gender}
+    Symptoms: {ctx.current_symptoms}
+    Allergies: {ctx.allergies}
+    Current medicines: {ctx.current_medications}
+
+    Prescribe accurate medicine for ALL symptoms.
+    Use correct dosage based on age.
+    Prefer tablets for adults.
+    Write full instructions: timing, food, duration.
+    Add caring advice.
+    Vary wording naturally — never repeat same prescription.
     """,
     model=model,
     output_type=Prescription
 )
 
-# --- General Advice Agent ---
 advice_agent = Agent[PatientContext](
     name="General Advisor",
     instructions="""
-    Give accurate, evidence-based advice.
-    Be caring and clear about red flags.
+    Give caring, accurate advice based on patient symptoms, age, and profile.
+    Include home care and red flags.
     Never prescribe.
     """,
     model=model,
     output_type=GeneralAdvice
 )
 
-# --- Main Doctor - THIS LINE MUST BE EXACT ---
 doctor_agent = Agent[PatientContext](
     name="AI Doctor",
     instructions="""
-    You are a caring virtual doctor.
-    If medicine is needed → hand off to Prescription Doctor
+    You are a compassionate doctor.
+    Use full patient profile for personalized response.
+    If medicine needed → hand off to Prescription Doctor
     Else → General Advisor
-    Always prioritize accuracy and safety.
+    Be natural and caring.
     """,
     model=model,
     handoffs=[prescription_agent, advice_agent],
     input_guardrails=[InputGuardrail(guardrail_function=input_guardrail)],
-    output_guardrails=[OutputGuardrail(guardrail_function=output_guardrail)]  # ← MUST BE EXACT
+    output_guardrails=[OutputGuardrail(guardrail_function=output_guardrail)]
 )
