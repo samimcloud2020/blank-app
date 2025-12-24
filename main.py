@@ -10,14 +10,14 @@ import os
 load_dotenv()
 model = os.getenv('LLM_MODEL_NAME', 'gpt-4o-mini')
 
-# --- Realistic Prescription Model ---
+# --- Models ---
 class Prescription(BaseModel):
-    medications: List[str] = Field(description="Medication with strength, e.g., 'Tab. Paracetamol 650mg'")
-    sig: List[str] = Field(description="Full patient instructions: dosage, timing, food relation, e.g., 'One tablet twice daily after food'")
-    duration: str = Field(description="How long to take, e.g., 'for 5 days' or 'until symptoms improve'")
-    quantity: List[str] = Field(description="Dispense quantity in number and words, e.g., '#30 (Thirty)'")
+    medications: List[str] = Field(description="e.g., 'Tab. Paracetamol 650mg'")
+    sig: List[str] = Field(description="Full instructions, e.g., 'One tablet three times daily after food'")
+    duration: str = Field(description="e.g., 'for 5 days'")
+    quantity: List[str] = Field(description="e.g., '#15 (Fifteen)'")
     refills: str = Field(default="No refills")
-    additional_notes: Optional[str] = Field(default=None, description="Warnings, side effects, when to stop, etc.")
+    additional_notes: Optional[str] = Field(default=None)
 
 class GeneralAdvice(BaseModel):
     advice: str
@@ -40,124 +40,68 @@ class PatientContext:
 
 # --- Safety Reviewer ---
 safety_reviewer_agent = Agent(
-    name="Medical Safety Reviewer",
+    name="Safety Reviewer",
     instructions="""
-    You are a strict medical safety expert.
-    
-    APPROVE only safe, common, non-controlled medications:
-    - Paracetamol, Ibuprofen, Cetirizine, Loratadine, Omeprazole, Amoxicillin, Azithromycin
-    - Cough syrups (Ascoril LS, Benadryl), antacids, antihistamines, etc.
-    
-    BLOCK immediately:
-    - Opioids, benzodiazepines, stimulants, sleeping pills, steroids, weight loss drugs
-    - Any controlled substance
-    - Ignoring known allergies
-    - Overdosing or dangerous combinations
-    
-    Always prioritize patient safety.
+    Approve only safe common medications: Paracetamol, Ibuprofen, Cetirizine, Amoxicillin, Omeprazole, cough syrups, etc.
+    Block opioids, benzodiazepines, stimulants, steroids, weight loss drugs.
+    Check allergies and interactions.
     """,
     output_type=SafetyAnalysis,
     model=model
 )
 
-async def input_guardrail(ctx: PatientContext, agent, input_data: str):
+async def input_guardrail(ctx, agent, input_data):
     try:
-        prompt = f"""
-        Patient message: "{input_data}"
-        Known allergies: {ctx.allergies}
-        Current medications: {ctx.current_medications}
-        
-        Does this request involve controlled substances, drug-seeking, or unsafe demands?
-        Is it safe to evaluate for common medication?
-        """
+        prompt = f"Patient says: '{input_data}'. Allergies: {ctx.allergies}. Safe to proceed with common meds?"
         result = await Runner.run(safety_reviewer_agent, prompt)
         analysis = result.final_output_as(SafetyAnalysis)
         return GuardrailFunctionOutput(output_info=analysis, tripwire_triggered=not analysis.is_safe)
     except:
         return GuardrailFunctionOutput(output_info=SafetyAnalysis(is_safe=True, reasoning="Error"), tripwire_triggered=False)
 
-async def output_guardrail(ctx: PatientContext, agent, input_data: str, output_data):
+async def output_guardrail(ctx, agent, input_data, output_data):
     try:
-        output_str = str(output_data)
-        prompt = f"""
-        Review this response for safety:
-        {output_str}
-        
-        Patient allergies: {ctx.allergies}
-        Current meds: {ctx.current_medications}
-        
-        Does it prescribe only allowed safe medications?
-        Does it avoid controlled drugs and dangerous advice?
-        """
+        prompt = f"Review response: {str(output_data)}. Allergies: {ctx.allergies}. Only safe meds allowed?"
         result = await Runner.run(safety_reviewer_agent, prompt)
         analysis = result.final_output_as(SafetyAnalysis)
         if not analysis.is_safe:
-            safe = GeneralAdvice(
-                advice="I cannot prescribe or recommend that medication as it may be unsafe or restricted without in-person evaluation.",
-                follow_up="Please consult a licensed doctor in person."
-            )
+            safe = GeneralAdvice(advice="Cannot prescribe — unsafe or restricted.", follow_up="See doctor in person.")
             return GuardrailFunctionOutput(output_info=safe, tripwire_triggered=True, override_output=safe)
         return GuardrailFunctionOutput(output_info=analysis, tripwire_triggered=False)
     except:
-        fallback = GeneralAdvice(advice="Safety check error.", follow_up="See a doctor.")
+        fallback = GeneralAdvice(advice="Safety error.", follow_up="Consult doctor.")
         return GuardrailFunctionOutput(output_info=fallback, tripwire_triggered=True, override_output=fallback)
 
-# --- Prescription Agent - NOW GIVES VARIED, PERSONALIZED PRESCRIPTIONS ---
+# --- Prescription Doctor - Varied & Natural ---
 prescription_agent = Agent[PatientContext](
     name="Prescription Doctor",
     instructions="""
-    You are a compassionate, experienced family doctor in India writing a real prescription.
-
-    Think step-by-step:
-    1. Carefully read the patient's current symptoms, age, gender, allergies, and current medications.
-    2. Diagnose the most likely common condition (cold, fever, allergy, acidity, cough, etc.).
-    3. Choose appropriate, safe medications from common ones only.
-    4. Vary dosage and timing based on age and severity (e.g., lower dose for elderly).
-    5. Always include relation to food (before/after) and specific times (morning/night).
-    6. Use realistic Indian pharmacy names and formats.
-
-    Write in professional format:
-    - Medication name with strength
-    - Full instructions: "One tablet twice daily after food in morning and night"
-    - Duration: "for 3 days" or "5 days" or "until symptoms resolve"
-    - Quantity: number and words
-    - Add helpful notes (e.g., drink water, rest, when to seek help)
-
-    Be natural and vary your prescriptions — do not repeat the same one.
-    Always check allergies before prescribing.
+    You are an experienced Indian family doctor.
+    Analyze symptoms, age, allergies carefully.
+    Prescribe only safe common medicines.
+    Vary dosage, timing, duration naturally.
+    Use realistic format with food relation and specific times.
+    Be empathetic and add useful notes.
     """,
     model=model,
     output_type=Prescription
 )
 
-# --- General Advisor ---
 advice_agent = Agent[PatientContext](
-    name="General Medical Advisor",
-    instructions="""
-    You are a caring doctor giving safe, evidence-based advice.
-    
-    Suggest home remedies, rest, hydration, diet tips.
-    Clearly mention red flags: when to go to hospital.
-    Be empathetic and detailed.
-    Never prescribe — only advise.
-    """,
+    name="General Advisor",
+    instructions="Give caring, detailed advice with home care and red flags.",
     model=model,
     output_type=GeneralAdvice
 )
 
-# --- Main Virtual Doctor ---
+# --- Main Doctor ---
 doctor_agent = Agent[PatientContext](
     name="AI Doctor",
     instructions="""
-    You are a kind, professional virtual doctor in Rourkela, Odisha.
-    
-    Listen carefully to the patient's complaint.
-    
-    - If they describe symptoms and need medicine → hand off to Prescription Doctor
-    - If they ask for advice, prevention, or general health → hand off to General Medical Advisor
-    
-    Always be empathetic, clear, and responsible.
-    Respond in a natural, conversational way.
+    You are a kind virtual doctor.
+    If patient needs medicine → hand off to Prescription Doctor
+    Else → General Advisor
+    Be natural and caring.
     """,
     model=model,
     handoffs=[prescription_agent, advice_agent],
