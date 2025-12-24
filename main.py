@@ -12,10 +12,10 @@ model = os.getenv('LLM_MODEL_NAME', 'gpt-4o-mini')
 
 # --- Models ---
 class Prescription(BaseModel):
-    medications: List[str]
-    sig: List[str]
-    duration: str
-    quantity: List[str]
+    medications: List[str] = Field(description="Medicine with strength, e.g., 'Tab. Cetirizine 10mg'")
+    sig: List[str] = Field(description="Real doctor style: 'One tablet once daily at night after food'")
+    duration: str = Field(description="e.g., 'for 5 days'")
+    quantity: List[str] = Field(description="e.g., '#10 (Ten tablets)'")
     refills: str = "No refills"
     additional_notes: Optional[str] = None
 
@@ -41,14 +41,14 @@ class PatientContext:
 # --- Safety Reviewer ---
 safety_reviewer_agent = Agent(
     name="Safety Reviewer",
-    instructions="Strictly check dosage, concentration, allergies. Block unsafe or wrong prescriptions.",
+    instructions="Strictly check for correct dosage, concentration, allergies, interactions. Block unsafe or wrong prescriptions.",
     output_type=SafetyAnalysis,
     model=model
 )
 
 async def input_guardrail(ctx: PatientContext, agent, input_data: str):
     try:
-        prompt = f"Patient: {ctx.patient_id}, Age: {ctx.age}, Symptoms: {ctx.current_symptoms}, Allergies: {ctx.allergies}. Message: '{input_data}'. Safe to proceed?"
+        prompt = f"Patient: {ctx.patient_id}, Age: {ctx.age}, Symptoms: {ctx.current_symptoms}, Allergies: {ctx.allergies}. Message: '{input_data}'. Safe?"
         result = await Runner.run(safety_reviewer_agent, prompt)
         analysis = result.final_output_as(SafetyAnalysis)
         return GuardrailFunctionOutput(output_info=analysis, tripwire_triggered=not analysis.is_safe)
@@ -61,20 +61,20 @@ async def output_guardrail(ctx: PatientContext, agent, input_data: str, output_d
         result = await Runner.run(safety_reviewer_agent, prompt)
         analysis = result.final_output_as(SafetyAnalysis)
         if not analysis.is_safe:
-            safe = GeneralAdvice(advice="Cannot prescribe — unsafe or inaccurate.", follow_up="See doctor.")
+            safe = GeneralAdvice(advice="Cannot prescribe — unsafe or inaccurate.", follow_up="See doctor in person.")
             return GuardrailFunctionOutput(output_info=safe, tripwire_triggered=True, override_output=safe)
         return GuardrailFunctionOutput(output_info=analysis, tripwire_triggered=False)
     except:
         fallback = GeneralAdvice(advice="Safety error.", follow_up="See doctor.")
         return GuardrailFunctionOutput(output_info=fallback, tripwire_triggered=True, override_output=fallback)
 
-# --- Prescription Doctor - Personalized & Varied ---
+# --- Real-World Prescription Doctor ---
 prescription_agent = Agent[PatientContext](
     name="Prescription Doctor",
     instructions="""
-    You are a caring family doctor in Rourkela.
+    You are a senior family physician in Rourkela, Odisha writing real prescriptions.
 
-    Patient details:
+    Patient:
     Name: {ctx.patient_id}
     Age: {ctx.age}
     Gender: {ctx.gender}
@@ -82,39 +82,33 @@ prescription_agent = Agent[PatientContext](
     Allergies: {ctx.allergies}
     Current medicines: {ctx.current_medications}
 
-    Prescribe accurate medicine for ALL symptoms.
-    Use correct dosage based on age.
-    Prefer tablets for adults.
-    Write full instructions: timing, food, duration.
-    Add caring advice.
-    Vary wording naturally — never repeat same prescription.
+    You MUST prescribe medicine for the symptoms.
+    Write exactly like real doctors:
+    - Use Tab., Cap., Syrup., etc.
+    - Correct strength (e.g., Tab. Paracetamol 650mg, Syrup Cetirizine 5mg/5ml)
+    - Real instructions: "One tablet three times daily after food", "10 ml once daily at night"
+    - Duration: "for 3 days", "for 5 days"
+    - Quantity: "#15 (Fifteen)", "#100 ml (One hundred ml)"
+    - Add notes: "Take with water", "Avoid alcohol", "If no improvement in 3 days, consult doctor"
+
+    Be natural, caring, and professional.
+    Vary wording but always accurate.
     """,
     model=model,
     output_type=Prescription
 )
 
-advice_agent = Agent[PatientContext](
-    name="General Advisor",
-    instructions="""
-    Give caring, accurate advice based on patient symptoms, age, and profile.
-    Include home care and red flags.
-    Never prescribe.
-    """,
-    model=model,
-    output_type=GeneralAdvice
-)
-
+# --- Main Doctor - Always Prescribes ---
 doctor_agent = Agent[PatientContext](
     name="AI Doctor",
     instructions="""
-    You are a compassionate doctor.
-    Use full patient profile for personalized response.
-    If medicine needed → hand off to Prescription Doctor
-    Else → General Advisor
-    Be natural and caring.
+    You are a caring doctor.
+    The patient has entered symptoms and profile.
+    Always hand off to Prescription Doctor to write a real Rx prescription.
+    Do not give only advice — prescribe medicine.
     """,
     model=model,
-    handoffs=[prescription_agent, advice_agent],
+    handoffs=[prescription_agent],
     input_guardrails=[InputGuardrail(guardrail_function=input_guardrail)],
     output_guardrails=[OutputGuardrail(guardrail_function=output_guardrail)]
 )
