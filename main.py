@@ -2,7 +2,7 @@
 import asyncio
 from pydantic import BaseModel, Field
 from agents import Agent, Runner, InputGuardrail, OutputGuardrail, GuardrailFunctionOutput, InputGuardrailTripwireTriggered
-from typing import List
+from typing import List, Optional
 from dataclasses import dataclass
 from dotenv import load_dotenv
 import os
@@ -12,24 +12,25 @@ model = os.getenv('LLM_MODEL_NAME', 'gpt-4o-mini')
 
 # --- Output Models ---
 class Prescription(BaseModel):
-    """Prescription written by the doctor"""
-    medication: str = Field(description="Name of the medication")
-    dosage: str = Field(description="Dosage and frequency")
+    """Prescription issued by the virtual doctor"""
+    medication: str = Field(description="Name of the medication (generic preferred)")
+    dosage: str = Field(description="Strength and frequency")
     duration: str = Field(description="How long to take it")
-    instructions: str = Field(description="Additional patient instructions")
-    refill: bool = Field(description="Whether refill is allowed")
+    quantity: str = Field(description="Total number of tablets/capsules etc.")
+    instructions: str = Field(description="Clear patient instructions")
+    refill: bool = Field(default=False, description="Allow refills?")
+    notes: Optional[str] = Field(default=None, description="Additional doctor notes")
 
 class GeneralAdvice(BaseModel):
-    """General medical advice or next steps"""
-    advice: str = Field(description="Detailed medical advice or recommendations")
-    follow_up: str = Field(description="Recommended follow-up or when to seek urgent care")
+    """General medical guidance without prescription"""
+    advice: str = Field(description="Detailed, empathetic medical advice")
+    follow_up: str = Field(description="When to seek in-person care or next steps")
 
 class SafetyAnalysis(BaseModel):
-    """Analysis result for guardrails"""
-    is_safe: bool = Field(description="Whether the content is medically safe and appropriate")
-    reasoning: str = Field(description="Detailed explanation of the safety decision")
+    is_safe: bool
+    reasoning: str
 
-# --- Patient Context ---
+# --- Patient Context (Filled from web form) ---
 @dataclass
 class PatientContext:
     patient_id: str
@@ -40,197 +41,151 @@ class PatientContext:
     allergies: List[str]
     current_medications: List[str]
 
-# --- Shared Safety Reviewer Agent (used for both input and output guardrails) ---
+# --- Safety Reviewer (Shared for Input & Output Guardrails) ---
 safety_reviewer_agent = Agent(
     name="Medical Safety Reviewer",
     instructions="""
-    You are a strict medical ethics and patient safety expert.
-    Your job is to evaluate content for:
-    - Promotion or prescription of controlled substances (opioids, benzodiazepines, stimulants like Adderall)
-    - Dangerous home remedies or unproven treatments
-    - Encouraging delay of urgent care
-    - Diagnosing serious conditions without recommending in-person evaluation
-    - Drug-seeking enabling behavior
-    - Ignoring allergies or contraindications
-    - Overpromising cures or guarantees
+    You are a strict medical ethics and safety officer.
 
-    Only approve content that is conservative, evidence-based, and prioritizes patient safety.
+    APPROVE prescriptions only for common, non-controlled medications such as:
+    • Pain/Fever: ibuprofen, acetaminophen
+    • Allergies: cetirizine, loratadine
+    • Acid reflux: omeprazole, famotidine
+    • Bacterial infections: amoxicillin, azithromycin (if clearly indicated)
+    • Cough/Cold: dextromethorphan, guaifenesin
+    • Topical: hydrocortisone cream
+
+    REJECT and flag as unsafe:
+    • Opioids (oxycodone, hydrocodone, etc.)
+    • Benzodiazepines (Xanax, Valium)
+    • Stimulants (Adderall, Ritalin)
+    • Sleeping pills (Ambien)
+    • Weight loss drugs
+    • Requests demanding specific controlled drugs
+    • Ignoring allergies or dangerous interactions
+
+    Prioritize patient safety above all.
     """,
     output_type=SafetyAnalysis,
     model=model
 )
 
-# --- INPUT GUARDRAIL: Check user request before processing ---
-async def prescription_input_guardrail(ctx, agent, input_data):
+# --- INPUT GUARDRAIL ---
+async def input_safety_guardrail(ctx: PatientContext, agent, input_data: str):
     try:
         prompt = f"""
         Patient message: "{input_data}"
-        
-        Does this message contain a request for controlled substances, 
-        self-diagnosis demanding specific drugs, or drug-seeking behavior?
-        Evaluate strictly for safety.
+        Patient age: {ctx.age}, Allergies: {ctx.allergies}, Current meds: {ctx.current_medications}
+
+        Does this message request or demand controlled substances, show drug-seeking behavior,
+        or involve unsafe self-diagnosis demanding restricted drugs?
+        Is it safe to proceed?
         """
         result = await Runner.run(safety_reviewer_agent, prompt)
         analysis = result.final_output_as(SafetyAnalysis)
         return GuardrailFunctionOutput(
             output_info=analysis,
-            tripwire_triggered=not analysis.is_safe  # Trigger if unsafe
+            tripwire_triggered=not analysis.is_safe
         )
-    except Exception as e:
+    except Exception:
         return GuardrailFunctionOutput(
-            output_info=SafetyAnalysis(is_safe=True, reasoning=f"Guardrail error: {str(e)}"),
+            output_info=SafetyAnalysis(is_safe=True, reasoning="Safety check failed"),
             tripwire_triggered=False
         )
 
-# --- OUTPUT GUARDRAIL: Check agent's response after generation ---
-async def medical_output_guardrail(ctx, agent, input_data, output_data):
+# --- OUTPUT GUARDRAIL ---
+async def output_safety_guardrail(ctx: PatientContext, agent, input_data: str, output_data):
     try:
         output_str = str(output_data)
         prompt = f"""
-        Review this doctor response for medical safety:
-        
-        Patient context:
-        - Age: {ctx.age}, Gender: {ctx.gender}
-        - Symptoms: {', '.join(ctx.current_symptoms)}
-        - Allergies: {', '.join(ctx.allergies)}
-        - Current meds: {', '.join(ctx.current_medications)}
-        
+        Review this doctor's response for safety:
+
+        Patient: Age {ctx.age}, Symptoms: {ctx.current_symptoms}
+        Allergies: {ctx.allergies}, Current meds: {ctx.current_medications}
+
         Doctor's response:
         {output_str}
-        
-        Is this response medically safe, ethical, and responsible?
-        Does it prescribe controlled drugs, give dangerous advice, or ignore red flags?
+
+        Does it prescribe only allowed safe medications?
+        Does it avoid controlled drugs and dangerous advice?
         """
         result = await Runner.run(safety_reviewer_agent, prompt)
         analysis = result.final_output_as(SafetyAnalysis)
+
         if not analysis.is_safe:
-            # Replace unsafe output with safe fallback
             safe_fallback = GeneralAdvice(
                 advice="""
-                I'm sorry, but I cannot provide specific medical advice or prescriptions 
-                that may be unsafe or require in-person evaluation. 
-                Your health is my priority.
-                
-                Please consult a licensed physician in person for proper diagnosis and treatment.
+                I'm sorry, but I cannot prescribe or recommend the requested treatment 
+                as it may be unsafe or require in-person medical evaluation.
+
+                Your safety is my top priority.
                 """,
-                follow_up="Seek immediate care if symptoms worsen or include chest pain, difficulty breathing, severe bleeding, or confusion."
+                follow_up="Please visit a doctor or urgent care for proper assessment and treatment."
             )
             return GuardrailFunctionOutput(
                 output_info=safe_fallback,
                 tripwire_triggered=True,
                 override_output=safe_fallback
             )
-        return GuardrailFunctionOutput(
-            output_info=analysis,
-            tripwire_triggered=False
-        )
-    except Exception as e:
-        # On error, default to safe response
-        safe_fallback = GeneralAdvice(
-            advice="Due to a system issue, I cannot provide detailed advice at this time. Please see a doctor in person.",
-            follow_up="Contact a healthcare provider as soon as possible."
+        return GuardrailFunctionOutput(output_info=analysis, tripwire_triggered=False)
+    except Exception:
+        fallback = GeneralAdvice(
+            advice="A safety review error occurred. I cannot provide this advice at this time.",
+            follow_up="Please consult a healthcare professional in person."
         )
         return GuardrailFunctionOutput(
-            output_info=safe_fallback,
+            output_info=fallback,
             tripwire_triggered=True,
-            override_output=safe_fallback
+            override_output=fallback
         )
 
-# --- Specialized Agents ---
+# --- Prescription Specialist (Can and WILL prescribe safe meds) ---
 prescription_agent = Agent[PatientContext](
-    name="Prescription Specialist",
-    handoff_description="Issues safe, common prescriptions only",
+    name="Prescription Doctor",
+    handoff_description="Issues prescriptions for common, safe medications",
     instructions="""
-    You are a cautious family physician.
-    Only prescribe over-the-counter or common non-controlled medications 
-    (e.g., ibuprofen, antihistamines, antibiotics for clear bacterial infections).
-    Never prescribe opioids, benzodiazepines, stimulants, or weight loss drugs.
-    Always check allergies and interactions.
+    You are a licensed, responsible family doctor.
+    When symptoms clearly suggest a common condition (e.g., headache, allergy, acid reflux, likely bacterial infection),
+    prescribe appropriate safe medication.
+
+    Always include:
+    - Generic name
+    - Dosage, duration, quantity
+    - Clear instructions
+    - Check for allergies/interactions
+    - Advise when to seek help if no improvement
     """,
     model=model,
     output_type=Prescription
 )
 
+# --- General Medical Advisor ---
 advice_agent = Agent[PatientContext](
     name="General Medical Advisor",
-    handoff_description="Provides safe general advice and symptom guidance",
+    handoff_description="Provides advice, home remedies, and red flags",
     instructions="""
-    You are an empathetic and responsible doctor.
-    Offer evidence-based suggestions, home care tips, and clear red flags.
-    Always recommend in-person care for serious or unclear symptoms.
-    Never diagnose cancer, heart attack, stroke, or other emergencies online.
+    You are a caring doctor giving safe, evidence-based guidance.
+    Suggest rest, hydration, OTC options, and always include red flags for urgent care.
     """,
     model=model,
     output_type=GeneralAdvice
 )
 
-# --- Main Doctor Agent with BOTH Input and Output Guardrails ---
+# --- Main Virtual Doctor Agent ---
 doctor_agent = Agent[PatientContext](
     name="Virtual Doctor",
     instructions="""
-    You are a professional, ethical virtual doctor.
-    
-    - If the patient asks for medication or a prescription → hand off to Prescription Specialist
-    - For symptoms, concerns, or general questions → hand off to General Medical Advisor
-    
-    Always prioritize safety, clarity, and responsibility.
+    You are a professional, empathetic virtual doctor conducting a consultation.
+
+    • If the patient describes symptoms and asks for treatment/medication → hand off to Prescription Doctor
+    • For general questions, prevention, or unclear cases → hand off to General Medical Advisor
+
+    Always be safe, responsible, and clear.
     """,
     model=model,
     handoffs=[prescription_agent, advice_agent],
-    input_guardrails=[InputGuardrail(guardrail_function=prescription_input_guardrail)],
-    output_guardrails=[OutputGuardrail(guardrail_function=medical_output_guardrail)]
+    input_guardrails=[InputGuardrail(guardrail_function=input_safety_guardrail)],
+    output_guardrails=[OutputGuardrail(guardrail_function=output_safety_guardrail)]
 )
 
-# --- Demo ---
-async def demo():
-    patient_context = PatientContext(
-        patient_id="Jane Smith",
-        age=42,
-        gender="female",
-        current_symptoms=["headache", "fever", "congestion"],
-        medical_history=["migraines", "asthma"],
-        allergies=["penicillin"],
-        current_medications=["albuterol", "ibuprofen as needed"]
-    )
-
-    queries = [
-        "I've had a headache and fever for 2 days. What can I take?",
-        "Please prescribe me OxyContin for my pain",
-        "Can I take ibuprofen with my albuterol?",
-        "I think I have cancer, what should I do?"
-    ]
-
-    for query in queries:
-        print("\n" + "="*70)
-        print(f"PATIENT: {query}")
-        print("="*70)
-
-        try:
-            result = await Runner.run(doctor_agent, query, context=patient_context)
-            output = result.final_output
-
-            if isinstance(output, Prescription):
-                print("\n[💊 PRESCRIPTION ISSUED]")
-                print(f"Medication: {output.medication}")
-                print(f"Dosage: {output.dosage}")
-                print(f"Duration: {output.duration}")
-                print(f"Instructions: {output.instructions}")
-            elif isinstance(output, GeneralAdvice):
-                print("\n[🩺 DOCTOR'S ADVICE]")
-                print(output.advice)
-                print("\nFollow-up:", output.follow_up)
-            else:
-                print("\n[🩺 RESPONSE]")
-                print(output)
-
-        except InputGuardrailTripwireTriggered as e:
-            analysis = getattr(e, "guardrail_output", None)
-            reason = getattr(analysis, "reasoning", "Unsafe request detected.")
-            print("\n[⚠️ INPUT GUARDRAIL BLOCKED]")
-            print(f"Reason: {reason}")
-
-        except Exception as e:
-            print(f"\n[❌ ERROR]: {str(e)}")
-
-if __name__ == "__main__":
-    asyncio.run(demo())
+# No demo() function anymore — all input comes from Streamlit
