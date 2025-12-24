@@ -1,14 +1,14 @@
 # main.py
 import asyncio
 from pydantic import BaseModel, Field
-from agents import Agent, Runner, InputGuardrail, OutputGuardrail, GuardrailFunctionOutput, InputGuardrailTripwireTriggered
+from agents import Agent, Runner, InputGuardrail, OutputGuardrail, GuardrailFunctionOutput, InputGuardrailTripwireTriggered, WebSearchTool  # ← IMPORT WebSearchTool
 from typing import List, Optional
 from dataclasses import dataclass
 from dotenv import load_dotenv
 import os
 
 load_dotenv()
-model = os.getenv('LLM_MODEL_NAME', 'gpt-4o-mini')  # Use model that supports tools
+model = os.getenv('LLM_MODEL_NAME', 'gpt-4o-mini')  # Model that supports tool calling
 
 # --- Models ---
 class Prescription(BaseModel):
@@ -90,26 +90,7 @@ async def output_guardrail(ctx: PatientContext, agent, input_data: str, output_d
         fallback = GeneralAdvice(advice="Safety system error.", follow_up="Consult a doctor.")
         return GuardrailFunctionOutput(output_info=fallback, tripwire_triggered=True, override_output=fallback)
 
-# --- Official OpenAI Web Search Tool ---
-web_search_tool = {
-    "type": "function",
-    "function": {
-        "name": "search",
-        "description": "Search the web for accurate medical information: drug dosage, concentration, side effects, interactions, guidelines in India.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Specific query, e.g., 'Paracetamol 650mg dosage for adults India', 'Cetirizine 10mg tablet uses and side effects'"
-                }
-            },
-            "required": ["query"]
-        }
-    }
-}
-
-# --- Prescription Doctor - Uses Web Search + Patient Context ---
+# --- Prescription Doctor - Uses Built-in WebSearchTool() ---
 prescription_agent = Agent[PatientContext](
     name="Prescription Doctor",
     instructions="""
@@ -126,8 +107,8 @@ prescription_agent = Agent[PatientContext](
     You MUST prescribe medicine for the symptoms.
 
     Before prescribing:
-    - Use the 'search' tool to verify correct dosage, concentration, and safety from reliable sources.
-    - Search for: drug name + dosage + India, side effects, interactions with current meds.
+    - Use the web_search tool to verify correct dosage, concentration, and safety from reliable sources.
+    - Search queries like: 'Paracetamol 650mg dosage for adults India', 'Cetirizine 10mg tablet uses and side effects', 'drug name + dosage + India'
 
     Write in real doctor style:
     - Tab., Cap., Syrup.
@@ -142,7 +123,7 @@ prescription_agent = Agent[PatientContext](
     """,
     model=model,
     output_type=Prescription,
-    tools=[web_search_tool]  # Uses web search for accuracy
+    tools=[WebSearchTool()]  # ← CORRECT: Use the built-in WebSearchTool class
 )
 
 # --- Main Doctor - Always Prescribes Medicine ---
