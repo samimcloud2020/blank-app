@@ -8,11 +8,10 @@ from chromadb.utils import embedding_functions
 # ------------------- In-memory Vector Store (Session-persistent on Streamlit Cloud) -------------------
 if "collection" not in st.session_state:
     client = chromadb.EphemeralClient()  # Pure in-memory, no disk
-
     embedding_func = embedding_functions.SentenceTransformerEmbeddingFunction(
         model_name="all-MiniLM-L6-v2"
     )
-    
+   
     # Safely get or create collection
     st.session_state.collection = client.get_or_create_collection(
         name="knowledge",
@@ -93,7 +92,7 @@ with st.sidebar:
             for f in uploaded_files:
                 full_text += f.getvalue().decode("utf-8") + "\n\n"
             result = Runner.run_sync(extraction_agent, f"Extract and store:\n\n{full_text}")
-            st.success(result.final_output or "Knowledge ingested!")
+            st.success(result.final_output or "Knowledge ingested successfully!")
 
 # Chat history
 if "messages" not in st.session_state:
@@ -103,25 +102,34 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
+# Chat input
 if prompt := st.chat_input("Ask anything about your uploaded documents..."):
+    # Add user message
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
+    # Assistant response with streaming
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            # Synchronous run with manual delta streaming
+            # Run synchronously but stream token-by-token
             result = Runner.run_sync(query_agent, prompt)
+            
             placeholder = st.empty()
             full_response = ""
+            
+            # Stream deltas as they come
             for event in result.stream_events():
                 if event.type == "raw_response_event" and hasattr(event.data, "delta"):
-                    full_response += event.data.delta
+                    delta = event.data.delta
+                    full_response += delta
                     placeholder.markdown(full_response + "▌")  # Cursor effect
             
-            # Final render
+            # Final render without cursor
             placeholder.markdown(full_response)
     
+    # Save assistant message
     st.session_state.messages.append({"role": "assistant", "content": full_response})
 
+# Footer info
 st.info(f"Model: `{model}` • Knowledge persists during your session (resets on reload)")
