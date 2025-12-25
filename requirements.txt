@@ -1,5 +1,5 @@
+openai-agents
 streamlit
-chromadb
+chromadb==0.5.5  # Latest stable as of Dec 2025; supports EphemeralClient
 sentence-transformers
 openai
-openai-agents
