@@ -5,14 +5,12 @@ from typing import List
 import chromadb
 from chromadb.utils import embedding_functions
 
-# ------------------- In-memory Vector Store (Session-persistent on Streamlit Cloud) -------------------
+# ------------------- In-memory Vector Store (Session-persistent) -------------------
 if "collection" not in st.session_state:
-    client = chromadb.EphemeralClient()  # Pure in-memory, no disk
+    client = chromadb.EphemeralClient()
     embedding_func = embedding_functions.SentenceTransformerEmbeddingFunction(
         model_name="all-MiniLM-L6-v2"
     )
-   
-    # Safely get or create collection
     st.session_state.collection = client.get_or_create_collection(
         name="knowledge",
         embedding_function=embedding_func
@@ -91,6 +89,7 @@ with st.sidebar:
             full_text = ""
             for f in uploaded_files:
                 full_text += f.getvalue().decode("utf-8") + "\n\n"
+            # Note: No streaming needed for ingestion, so stream=False is fine (or omit)
             result = Runner.run_sync(extraction_agent, f"Extract and store:\n\n{full_text}")
             st.success(result.final_output or "Knowledge ingested successfully!")
 
@@ -104,32 +103,34 @@ for msg in st.session_state.messages:
 
 # Chat input
 if prompt := st.chat_input("Ask anything about your uploaded documents..."):
-    # Add user message
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Assistant response with streaming
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            # Run synchronously but stream token-by-token
-            result = Runner.run_sync(query_agent, prompt)
+            # IMPORTANT: Enable streaming
+            result = Runner.run_sync(query_agent, prompt, stream=True)
             
             placeholder = st.empty()
             full_response = ""
             
-            # Stream deltas as they come
+            # Now stream_events() is available
             for event in result.stream_events():
                 if event.type == "raw_response_event" and hasattr(event.data, "delta"):
-                    delta = event.data.delta
+                    delta = event.data.delta or ""
                     full_response += delta
-                    placeholder.markdown(full_response + "▌")  # Cursor effect
+                    placeholder.markdown(full_response + "▌")  # Streaming cursor
             
-            # Final render without cursor
-            placeholder.markdown(full_response)
+            # Final clean response
+            if full_response:
+                placeholder.markdown(full_response)
+            else:
+                # Fallback if no streaming events (rare)
+                full_response = result.final_output or ""
+                placeholder.markdown(full_response)
     
-    # Save assistant message
     st.session_state.messages.append({"role": "assistant", "content": full_response})
 
-# Footer info
+# Footer
 st.info(f"Model: `{model}` • Knowledge persists during your session (resets on reload)")
