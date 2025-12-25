@@ -1,5 +1,6 @@
 openai-agents
 streamlit
-chromadb==0.5.5  # Latest stable as of Dec 2025; supports EphemeralClient
+chromadb
 sentence-transformers
+nest_asyncio  # Helps with any nested loop issues
 openai
