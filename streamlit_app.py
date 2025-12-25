@@ -32,7 +32,6 @@ def add_chunks_to_db(chunks: List[str], metadatas: List[dict] | None = None):
 def extract_knowledge_chunks(text: str) -> List[str]:
     """Extract concise, self-contained knowledge chunks from raw text."""
     import re
-    # Simple sentence splitting – replace with better logic or LLM chunking if needed
     sentences = re.split(r'(?<=[.!?])\s+', text.strip())
     return [s.strip() for s in sentences if len(s) > 30]
 
@@ -59,7 +58,7 @@ extraction_agent = Agent(
     Be concise and avoid duplicates.
     """,
     tools=[extract_knowledge_chunks, store_knowledge_chunks],
-    model=st.secrets.get("MODEL_NAME", "gpt-4o-mini")  # Use secret or default
+    model=st.secrets.get("MODEL_NAME", "gpt-4o-mini")
 )
 
 query_agent = Agent(
@@ -80,11 +79,11 @@ query_agent = Agent(
 st.title("🧠 Agentic RAG Chatbot")
 st.caption("Upload documents to build knowledge, then ask questions!")
 
-# Sidebar for file upload (ingestion)
+# Sidebar for file upload
 with st.sidebar:
     st.header("Knowledge Ingestion")
     uploaded_files = st.file_uploader(
-        "Upload text/PDF files (plain text only for now)",
+        "Upload text files (.txt only for now)",
         type=["txt"],
         accept_multiple_files=True
     )
@@ -93,14 +92,13 @@ with st.sidebar:
             full_text = ""
             for file in uploaded_files:
                 full_text += file.getvalue().decode("utf-8") + "\n\n"
-            # Run extraction agent synchronously (simple case)
             result = Runner.run_sync(
                 extraction_agent,
                 f"Extract and store knowledge from this document:\n\n{full_text}"
             )
             st.success(result.final_output)
 
-# Chat interface
+# Chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -115,7 +113,6 @@ if prompt := st.chat_input("Ask a question about your knowledge base..."):
 
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            # Stream the response
             stream = Runner.run_streamed(query_agent, prompt)
             response = st.write_stream(item.content for item in stream if item.type == "text")
     
