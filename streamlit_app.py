@@ -5,7 +5,7 @@ from typing import List
 import chromadb
 from chromadb.utils import embedding_functions
 
-# ------------------- In-memory Vector Store (Session-persistent) -------------------
+# ------------------- In-memory Vector Store -------------------
 if "collection" not in st.session_state:
     client = chromadb.EphemeralClient()
     embedding_func = embedding_functions.SentenceTransformerEmbeddingFunction(
@@ -89,7 +89,6 @@ with st.sidebar:
             full_text = ""
             for f in uploaded_files:
                 full_text += f.getvalue().decode("utf-8") + "\n\n"
-            # Note: No streaming needed for ingestion, so stream=False is fine (or omit)
             result = Runner.run_sync(extraction_agent, f"Extract and store:\n\n{full_text}")
             st.success(result.final_output or "Knowledge ingested successfully!")
 
@@ -109,26 +108,12 @@ if prompt := st.chat_input("Ask anything about your uploaded documents..."):
 
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            # IMPORTANT: Enable streaming
-            result = Runner.run_sync(query_agent, prompt, stream=True)
-            
-            placeholder = st.empty()
-            full_response = ""
-            
-            # Now stream_events() is available
-            for event in result.stream_events():
-                if event.type == "raw_response_event" and hasattr(event.data, "delta"):
-                    delta = event.data.delta or ""
-                    full_response += delta
-                    placeholder.markdown(full_response + "▌")  # Streaming cursor
-            
-            # Final clean response
-            if full_response:
-                placeholder.markdown(full_response)
-            else:
-                # Fallback if no streaming events (rare)
-                full_response = result.final_output or ""
-                placeholder.markdown(full_response)
+            # Synchronous run - reliable in Streamlit
+            result = Runner.run_sync(query_agent, prompt)
+            full_response = result.final_output or ""
+
+            # Display the full response at once
+            st.markdown(full_response)
     
     st.session_state.messages.append({"role": "assistant", "content": full_response})
 
