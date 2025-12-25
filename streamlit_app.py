@@ -1,17 +1,18 @@
-# streamlit_app.py
 import streamlit as st
 from agents import Agent, Runner, function_tool
 from typing import List
 import chromadb
 from chromadb.utils import embedding_functions
 
-# ------------------- In-memory Vector Store (best for Streamlit Cloud) -------------------
+# ------------------- In-memory Vector Store (Session-persistent) -------------------
 if "collection" not in st.session_state:
-    client = chromadb.Client()  # Pure in-memory
+    client = chromadb.EphemeralClient()  # Pure in-memory
+
     embedding_func = embedding_functions.SentenceTransformerEmbeddingFunction(
         model_name="all-MiniLM-L6-v2"
     )
-    st.session_state.collection = client.create_collection(
+    
+    st.session_state.collection = client.get_or_create_collection(
         name="knowledge",
         embedding_function=embedding_func
     )
@@ -44,7 +45,7 @@ def retrieve_relevant_chunks(query: str, top_k: int = 6) -> List[str]:
     results = collection.query(query_texts=[query], n_results=top_k)
     return results["documents"][0]
 
-# ------------------- Agents (NO description= parameter!) -------------------
+# ------------------- Agents -------------------
 model = st.secrets.get("MODEL_NAME", "gpt-4o-mini")
 
 extraction_agent = Agent(
@@ -73,7 +74,7 @@ query_agent = Agent(
 )
 
 # ------------------- Streamlit UI -------------------
-st.title("Agentic RAG Chatbot")
+st.title("🧠 Agentic RAG Chatbot")
 st.caption("Upload .txt files → ask questions → powered by OpenAI Agents SDK")
 
 # Sidebar - Upload & Ingest
@@ -112,4 +113,4 @@ if prompt := st.chat_input("Ask anything about your uploaded documents..."):
         )
     st.session_state.messages.append({"role": "assistant", "content": response})
 
-st.info(f"Model: `{model}` • Knowledge stored in session (resets on reload)")
+st.info(f"Model: `{model}` • Knowledge persists during your session (resets on full reload)")
