@@ -1,17 +1,19 @@
+# streamlit_app.py
 import streamlit as st
 from agents import Agent, Runner, function_tool
 from typing import List
 import chromadb
 from chromadb.utils import embedding_functions
 
-# ------------------- In-memory Vector Store (Session-persistent) -------------------
+# ------------------- In-memory Vector Store (Session-persistent on Streamlit Cloud) -------------------
 if "collection" not in st.session_state:
-    client = chromadb.EphemeralClient()  # Pure in-memory
+    client = chromadb.EphemeralClient()  # Pure in-memory, no disk
 
     embedding_func = embedding_functions.SentenceTransformerEmbeddingFunction(
         model_name="all-MiniLM-L6-v2"
     )
     
+    # Safely get or create collection
     st.session_state.collection = client.get_or_create_collection(
         name="knowledge",
         embedding_function=embedding_func
@@ -93,7 +95,7 @@ with st.sidebar:
             result = Runner.run_sync(extraction_agent, f"Extract and store:\n\n{full_text}")
             st.success(result.final_output or "Knowledge ingested!")
 
-# Chat
+# Chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -107,10 +109,19 @@ if prompt := st.chat_input("Ask anything about your uploaded documents..."):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        response = st.write_stream(
-            item.content for item in Runner.run_streamed(query_agent, prompt)
-            if item.type == "text"
-        )
-    st.session_state.messages.append({"role": "assistant", "content": response})
+        with st.spinner("Thinking..."):
+            # Synchronous run with manual delta streaming
+            result = Runner.run_sync(query_agent, prompt)
+            placeholder = st.empty()
+            full_response = ""
+            for event in result.stream_events():
+                if event.type == "raw_response_event" and hasattr(event.data, "delta"):
+                    full_response += event.data.delta
+                    placeholder.markdown(full_response + "▌")  # Cursor effect
+            
+            # Final render
+            placeholder.markdown(full_response)
+    
+    st.session_state.messages.append({"role": "assistant", "content": full_response})
 
-st.info(f"Model: `{model}` • Knowledge persists during your session (resets on full reload)")
+st.info(f"Model: `{model}` • Knowledge persists during your session (resets on reload)")
