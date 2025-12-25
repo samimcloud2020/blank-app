@@ -1,157 +1,124 @@
-# streamlit_app.py
 import streamlit as st
-import nest_asyncio
-import asyncio
-from datetime import date
-from main import PatientContext, Runner, doctor_agent, InputGuardrailTripwireTriggered, Prescription
+from agents import Agent, Runner, function_tool
+from typing import List
+import chromadb
+from chromadb.utils import embedding_functions
+import os
 
-nest_asyncio.apply()
+# ------------------- Vector Store Setup -------------------
+DB_PATH = "knowledge_db"
 
-st.set_page_config(page_title="🩺 AI Doctor - Rourkela", page_icon="🩺", layout="centered")
+client = chromadb.PersistentClient(path=DB_PATH)
+embedding_func = embedding_functions.SentenceTransformerEmbeddingFunction(
+    model_name="all-MiniLM-L6-v2"
+)
+collection = client.get_or_create_collection(
+    name="knowledge",
+    embedding_function=embedding_func
+)
 
-st.markdown("""
-<style>
-    .big-title {font-size: 80px !important; font-weight: 900; background: linear-gradient(90deg, #ff1744, #00bcd4, #4caf50); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-align: center;}
-    .header-box {background: linear-gradient(135deg, #1e3a8a, #3b82f6); padding: 35px; border-radius: 30px; color: white; text-align: center;}
-    .rx-big {font-size: 140px !important; font-weight: 900; color: #dc2626; text-align: center; margin: 60px 0 40px 0; text-shadow: 12px 12px 30px rgba(220,38,38,0.4); letter-spacing: 25px;}
-    .rx-box {background: linear-gradient(to bottom, #f8fff8, #f0fdf4); border: 15px solid #16a34a; border-radius: 50px; padding: 70px; box-shadow: 0 40px 100px rgba(22,163,74,0.4);}
-    .med-item {background: linear-gradient(to right, #f0fdfa, #ccfbf1); padding: 45px; border-radius: 40px; margin: 40px 0; border-left: 20px solid #14b8a6; box-shadow: 0 20px 50px rgba(20,184,166,0.3);}
-    .patient-card {background: linear-gradient(to bottom, #dbeafe, #bfdbfe); border-left: 15px solid #2563eb; padding: 40px; border-radius: 30px; box-shadow: 0 15px 40px rgba(37,99,235,0.25);}
-    .sidebar-title {background: linear-gradient(90deg, #d946ef, #f72585); padding: 30px; border-radius: 30px; text-align: center; color: white; font-size: 34px; font-weight: bold;}
-    .sidebar-label {font-weight: bold; color: #fbbf24; font-size: 22px; background: #1e1b4b; padding: 15px; border-radius: 20px; text-align: center; margin: 25px 0 10px 0;}
-    .sidebar .sidebar-content {background: linear-gradient(180deg, #0f172a, #1e293b); color: white; border-radius: 35px; padding: 30px;}
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown("<div class='big-title'>🩺 AI DOCTOR</div>", unsafe_allow_html=True)
-st.markdown("""
-<div class='header-box'>
-    <h1 style='margin:0; font-size:48px;'>VIRTUAL HEALTH CLINIC</h1>
-    <h2 style='margin:15px 0; color:#fbbf24;'>Rourkela, Odisha, India</h2>
-    <p style='font-size:24px;'>Real Prescriptions • Personalized Care</p>
-</div>
-""", unsafe_allow_html=True)
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "current_prescription" not in st.session_state:
-    st.session_state.current_prescription = None
-
-# Sidebar
-with st.sidebar:
-    st.markdown("<div class='sidebar-title'>👤 Patient Profile</div>", unsafe_allow_html=True)
-
-    st.markdown("<div class='sidebar-label'>📝 Full Name</div>", unsafe_allow_html=True)
-    name = st.text_input("", value="Priya Singh", placeholder="Name", label_visibility="collapsed")
-
-    st.markdown("<div class='sidebar-label'>🎂 Age</div>", unsafe_allow_html=True)
-    age = st.number_input("", min_value=1, max_value=120, value=29, label_visibility="collapsed")
-
-    st.markdown("<div class='sidebar-label'>⚧ Gender</div>", unsafe_allow_html=True)
-    gender = st.selectbox("", ["Female", "Male", "Other"], label_visibility="collapsed")
-
-    st.markdown("<div class='sidebar-label'>😷 Symptoms</div>", unsafe_allow_html=True)
-    symptoms = st.multiselect("", ["Fever", "Headache", "Cough", "Sore Throat", "Body Pain", "Acidity", "Allergy", "Cold"], label_visibility="collapsed")
-    other = st.text_input("Other?", label_visibility="collapsed")
-    all_symptoms = symptoms + ([other] if other else [])
-
-    st.markdown("<div class='sidebar-label'>⚠️ Allergies</div>", unsafe_allow_html=True)
-    allergies = st.text_input("", placeholder="e.g., penicillin", label_visibility="collapsed")
-
-    st.markdown("<div class='sidebar-label'>💊 Current Medicines</div>", unsafe_allow_html=True)
-    current_meds = st.text_input("", placeholder="none", label_visibility="collapsed")
-
-    patient_context = PatientContext(
-        patient_id=name or "Patient",
-        age=age,
-        gender=gender,
-        current_symptoms=all_symptoms,
-        medical_history=[],
-        allergies=[a.strip() for a in allergies.split(",") if a.strip()],
-        current_medications=[m.strip() for m in current_meds.split(",") if m.strip()]
+def add_chunks_to_db(chunks: List[str], metadatas: List[dict] | None = None):
+    if not chunks:
+        return
+    ids = [f"chunk_{i}" for i in range(len(chunks))]
+    collection.add(
+        documents=chunks,
+        ids=ids,
+        metadatas=metadatas or [{} for _ in chunks]
     )
 
-# Layout
-col1, col2 = st.columns([1.4, 2.6])
-today = date.today().strftime("%d %B %Y")
+# ------------------- Tools with @function_tool -------------------
+@function_tool
+def extract_knowledge_chunks(text: str) -> List[str]:
+    """Extract concise, self-contained knowledge chunks from raw text."""
+    import re
+    # Simple sentence splitting – replace with better logic or LLM chunking if needed
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    return [s.strip() for s in sentences if len(s) > 30]
 
-with col1:
-    st.markdown(f"""
-    <div class='patient-card'>
-        <h2 style='color:#2563eb; text-align:center;'>📋 Patient</h2>
-        <div style='background:#e0f2fe; padding:30px; border-radius:25px; text-align:center;'>
-            <h3 style='color:#1e40af;'>{patient_context.patient_id}</h3>
-            <p style='font-size:19px;'><strong>Age:</strong> {patient_context.age} • <strong>Gender:</strong> {patient_context.gender}</p>
-            <p style='color:#dc2626;'><strong>Date:</strong> {today}</p>
-        </div>
-        <strong style='color:#dc2626;'>Symptoms:</strong><br>
-        <p style='font-size:17px; line-height:1.6;'>
-            {', '.join(patient_context.current_symptoms) or 'None'}
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+@function_tool
+def store_knowledge_chunks(chunks: List[str]) -> str:
+    """Store extracted chunks into the vector database."""
+    add_chunks_to_db(chunks)
+    return f"Stored {len(chunks)} knowledge chunks successfully."
 
-with col2:
-    st.markdown("<div class='rx-box'>", unsafe_allow_html=True)
-    st.markdown("""
-    <div style='text-align:center; margin-bottom:60px;'>
-        <h1 style='color:#dc2626; font-weight:900; font-size:60px;'>AI DOCTOR</h1>
-        <h2 style='color:#16a34a; font-size:36px;'>Virtual Health Clinic</h2>
-        <h3 style='color:#2563eb; font-size:30px;'><strong>Rourkela, Odisha</strong></h3>
-    </div>
-    """, unsafe_allow_html=True)
-    st.markdown("<div class='rx-big'>Rx</div>", unsafe_allow_html=True)
+@function_tool
+def retrieve_relevant_chunks(query: str, top_k: int = 5) -> List[str]:
+    """Retrieve top_k most relevant knowledge chunks for the query."""
+    results = collection.query(query_texts=[query], n_results=top_k)
+    return results["documents"][0]
 
-    if st.session_state.current_prescription:
-        output = st.session_state.current_prescription
-        for i in range(len(output.medications)):
-            st.markdown(f"""
-            <div class='med-item'>
-                <h3 style='color:#166534; font-size:30px; margin:0 0 20px 0;'>{i+1}. {output.medications[i]}</h3>
-                <p style='font-size:22px; margin:15px 0;'><strong style='color:#2563eb;'>Take:</strong> {output.sig[i]}</p>
-                <p style='font-size:21px; margin:15px 0; color:#dc2626;'><strong>Dispense:</strong> {output.quantity[i]}</p>
-            </div>
-            """, unsafe_allow_html=True)
-        st.markdown(f"<h3 style='text-align:center; color:#dc2626; font-size:32px; margin:50px 0;'>Duration: <strong>{output.duration}</strong></h3>", unsafe_allow_html=True)
-        st.markdown(f"<h3 style='text-align:center; color:#b91c1c; font-size:30px;'>Refills: <strong>{output.refills}</strong></h3>", unsafe_allow_html=True)
-        if output.additional_notes:
-            st.info(f"**Note:** {output.additional_notes}")
-    else:
-        st.markdown("""
-        <div style='text-align:center; padding:140px; background:#f8fafc; border-radius:40px; border:8px dashed #94a3b8;'>
-            <h3 style='color:#64748b; font-size:32px;'>Your prescription will appear here</h3>
-            <p style='color:#94a3b8; font-size:24px; margin:40px 0 0 0;'>Send a message below</p>
-        </div>
-        """, unsafe_allow_html=True)
+# ------------------- Agents -------------------
+extraction_agent = Agent(
+    name="Knowledge Extraction Agent",
+    description="Extracts and stores knowledge from documents",
+    instructions="""
+    You are an expert at extracting clean, atomic facts from documents.
+    1. Use extract_knowledge_chunks on the full document text.
+    2. Then use store_knowledge_chunks to save them.
+    Be concise and avoid duplicates.
+    """,
+    tools=[extract_knowledge_chunks, store_knowledge_chunks],
+    model=st.secrets.get("MODEL_NAME", "gpt-4o-mini")  # Use secret or default
+)
 
-    st.markdown("</div>", unsafe_allow_html=True)
+query_agent = Agent(
+    name="RAG Query Agent",
+    description="Answers questions using retrieved knowledge",
+    instructions="""
+    You are a helpful assistant that answers ONLY based on retrieved knowledge.
+    1. Always call retrieve_relevant_chunks first.
+    2. Synthesize a clear answer from the chunks.
+    3. If no relevant info, say "I don't have knowledge about that."
+    4. Cite sources by quoting key parts.
+    """,
+    tools=[retrieve_relevant_chunks],
+    model=st.secrets.get("MODEL_NAME", "gpt-4o-mini")
+)
 
-# Chat
-st.markdown("---")
-st.markdown("<h3 style='text-align:center; color:#1e3a8a; margin:70px 0 20px 0; font-size:32px;'>💬 Chat with AI Doctor</h3>", unsafe_allow_html=True)
+# ------------------- Streamlit UI -------------------
+st.title("🧠 Agentic RAG Chatbot")
+st.caption("Upload documents to build knowledge, then ask questions!")
 
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"], unsafe_allow_html=True)
+# Sidebar for file upload (ingestion)
+with st.sidebar:
+    st.header("Knowledge Ingestion")
+    uploaded_files = st.file_uploader(
+        "Upload text/PDF files (plain text only for now)",
+        type=["txt"],
+        accept_multiple_files=True
+    )
+    if st.button("Ingest Uploaded Files") and uploaded_files:
+        with st.spinner("Extracting and storing knowledge..."):
+            full_text = ""
+            for file in uploaded_files:
+                full_text += file.getvalue().decode("utf-8") + "\n\n"
+            # Run extraction agent synchronously (simple case)
+            result = Runner.run_sync(
+                extraction_agent,
+                f"Extract and store knowledge from this document:\n\n{full_text}"
+            )
+            st.success(result.final_output)
 
-if prompt := st.chat_input("🩺 Tell me your symptoms..."):
+# Chat interface
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+if prompt := st.chat_input("Ask a question about your knowledge base..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("🩺 Writing your prescription..."):
-            try:
-                result = asyncio.run(Runner.run(doctor_agent, prompt, context=patient_context))
-                output = result.final_output
+        with st.spinner("Thinking..."):
+            # Stream the response
+            stream = Runner.run_streamed(query_agent, prompt)
+            response = st.write_stream(item.content for item in stream if item.type == "text")
+    
+    st.session_state.messages.append({"role": "assistant", "content": response})
 
-                if isinstance(output, Prescription):
-                    st.session_state.current_prescription = output
-                    st.success("✅ **Prescription Ready!**")
-                    st.markdown("**See your Rx above ↑**")
-                    st.rerun()
-
-                st.session_state.messages.append({"role": "assistant", "content": str(output)})
-
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
+st.info(f"Using model: {st.secrets.get('MODEL_NAME', 'gpt-4o-mini')}")
