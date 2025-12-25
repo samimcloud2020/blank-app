@@ -1,26 +1,24 @@
+# streamlit_app.py
 import streamlit as st
 from agents import Agent, Runner, function_tool
 from typing import List
 import chromadb
 from chromadb.utils import embedding_functions
-from chromadb.config import Settings
 
-# ------------------- In-Memory Vector Store (Persists in session_state) -------------------
-@st.cache_resource
-def get_collection():
-    chroma_client = chromadb.Client(Settings(allow_reset=True))
+# ------------------- In-memory Vector Store (best for Streamlit Cloud) -------------------
+if "collection" not in st.session_state:
+    client = chromadb.Client()  # Pure in-memory
     embedding_func = embedding_functions.SentenceTransformerEmbeddingFunction(
         model_name="all-MiniLM-L6-v2"
     )
-    collection = chroma_client.create_collection(
+    st.session_state.collection = client.create_collection(
         name="knowledge",
         embedding_function=embedding_func
     )
-    return collection
 
-collection = get_collection()
+collection = st.session_state.collection
 
-def add_chunks_to_db(chunks: List[str]):
+def add_chunks(chunks: List[str]):
     if not chunks:
         return
     ids = [f"chunk_{i}" for i in range(len(chunks))]
@@ -29,70 +27,70 @@ def add_chunks_to_db(chunks: List[str]):
 # ------------------- Tools -------------------
 @function_tool
 def extract_knowledge_chunks(text: str) -> List[str]:
-    """Extract concise knowledge chunks from text."""
+    """Extract clean, factual sentences from raw text."""
     import re
     sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-    return [s.strip() for s in sentences if len(s) > 30]
+    return [s.strip() for s in sentences if len(s.strip()) > 25]
 
 @function_tool
 def store_knowledge_chunks(chunks: List[str]) -> str:
-    """Store chunks in vector DB."""
-    add_chunks_to_db(chunks)
-    return f"Stored {len(chunks)} chunks."
+    """Save chunks to vector database."""
+    add_chunks(chunks)
+    return f"Successfully stored {len(chunks)} chunks."
 
 @function_tool
-def retrieve_relevant_chunks(query: str, top_k: int = 5) -> List[str]:
-    """Retrieve top relevant chunks."""
-    if collection.count() == 0:
-        return ["No knowledge ingested yet."]
+def retrieve_relevant_chunks(query: str, top_k: int = 6) -> List[str]:
+    """Retrieve most relevant chunks for the query."""
     results = collection.query(query_texts=[query], n_results=top_k)
     return results["documents"][0]
 
-# ------------------- Agents (Model from secrets) -------------------
-model_name = st.secrets.get("MODEL_NAME", "gpt-4o-mini")
+# ------------------- Agents (NO description= parameter!) -------------------
+model = st.secrets.get("MODEL_NAME", "gpt-4o-mini")
 
 extraction_agent = Agent(
     name="Knowledge Extraction Agent",
-    description="Extracts and stores knowledge",
     instructions="""
-    1. Use extract_knowledge_chunks on the document.
-    2. Use store_knowledge_chunks to save.
-    Be concise.
+    You are an expert at extracting clean facts from documents.
+    1. Call extract_knowledge_chunks with the full text.
+    2. Then call store_knowledge_chunks with the result.
+    Be concise, remove fluff and duplicates.
     """,
     tools=[extract_knowledge_chunks, store_knowledge_chunks],
-    model=model_name
+    model=model
 )
 
 query_agent = Agent(
-    name="RAG Query Agent",
-    description="Answers using retrieved knowledge",
+    name="RAG Assistant",
     instructions="""
-    1. Always call retrieve_relevant_chunks first.
-    2. Answer ONLY from chunks. Cite key parts.
-    3. If irrelevant/no chunks: "No knowledge available."
+    You are a helpful assistant that answers questions using only the retrieved knowledge.
+    - Always call retrieve_relevant_chunks first.
+    - Base your answer only on the returned chunks.
+    - If nothing relevant is found, say: "I don't have information about that in my knowledge base."
+    - Quote or paraphrase the chunks naturally.
     """,
     tools=[retrieve_relevant_chunks],
-    model=model_name
+    model=model
 )
 
 # ------------------- Streamlit UI -------------------
-st.title("🧠 Agentic RAG Chatbot")
-st.caption("💡 Upload .txt files → Ingest → Ask questions!")
+st.title("Agentic RAG Chatbot")
+st.caption("Upload .txt files → ask questions → powered by OpenAI Agents SDK")
 
-# Sidebar: Ingestion
+# Sidebar - Upload & Ingest
 with st.sidebar:
-    st.header("📤 Ingest Knowledge")
-    uploaded_files = st.file_uploader("Upload .txt files", type=["txt"], accept_multiple_files=True)
-    if st.button("🚀 Ingest Files") and uploaded_files:
-        with st.spinner("Extracting & storing..."):
+    st.header("Upload Knowledge")
+    uploaded_files = st.file_uploader(
+        "Upload text files",
+        type=["txt"],
+        accept_multiple_files=True
+    )
+    if st.button("Ingest Files") and uploaded_files:
+        with st.spinner("Processing..."):
             full_text = ""
-            for file in uploaded_files:
-                full_text += file.getvalue().decode("utf-8") + "\n\n"
-            # Reset DB for fresh ingest
-            collection.delete_all()
-            result = Runner.run_sync(extraction_agent, f"Process:\n\n{full_text}")
-            st.success(result.final_output)
-            st.info(f"💾 Knowledge ready! DB size: {collection.count()} chunks")
+            for f in uploaded_files:
+                full_text += f.getvalue().decode("utf-8") + "\n\n"
+            result = Runner.run_sync(extraction_agent, f"Extract and store:\n\n{full_text}")
+            st.success(result.final_output or "Knowledge ingested!")
 
 # Chat
 if "messages" not in st.session_state:
@@ -102,19 +100,16 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-if prompt := st.chat_input("Ask about your knowledge..."):
+if prompt := st.chat_input("Ask anything about your uploaded documents..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("Retrieving & answering..."):
-            stream = Runner.run_streamed(query_agent, prompt)
-            full_response = ""
-            for item in stream:
-                if item.type == "text":
-                    st.write(item.content, end="")
-                    full_response += item.content
-            st.session_state.messages.append({"role": "assistant", "content": full_response})
+        response = st.write_stream(
+            item.content for item in Runner.run_streamed(query_agent, prompt)
+            if item.type == "text"
+        )
+    st.session_state.messages.append({"role": "assistant", "content": response})
 
-st.info(f"🤖 Model: {model_name} | 💾 Chunks: {collection.count()}")
+st.info(f"Model: `{model}` • Knowledge stored in session (resets on reload)")
